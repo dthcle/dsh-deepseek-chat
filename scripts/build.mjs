@@ -85,7 +85,9 @@ const client = await build({
   }],
 })
 
-const clientBody = client.outputFiles.find(file => file.path.endsWith('/client.js'))?.text
+// esbuild reports absolute native paths: on Windows the separator is "\\", so
+// match the basename rather than assuming a POSIX separator.
+const clientBody = client.outputFiles.find(file => path.basename(file.path) === 'client.js')?.text
 if (!clientBody) throw new Error('esbuild produced no client bundle')
 const externalRequests = [...new Set(Object.values(client.metafile.outputs)
   .flatMap(output => output.imports.filter(item => item.external).map(item => item.path)))].sort()

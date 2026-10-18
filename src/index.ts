@@ -6,6 +6,8 @@ import { DEFAULT_WEBSITE_LANGUAGE } from './identity.js'
 
 export const Config = schema.object({
   language: schema.union(['', 'system', 'zh-CN', 'en']).default(DEFAULT_WEBSITE_LANGUAGE).volatile(),
+  /** Added to every message the official page sends; empty disables the hook. */
+  systemPrompt: schema.string().default('').volatile(),
 })
 
 export const name = 'dsh-deepseek-chat'

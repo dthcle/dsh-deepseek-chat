@@ -1,7 +1,10 @@
 import type { WebsiteCommand } from './website-navigation.js'
 
-/** Public profile menu and General controls only; no site APIs or storage. */
-export function adaptWebsiteSettings(doc: Document, profile: HTMLElement | null, command: WebsiteCommand) {
+/** One document may begin only this many settings runs before it stops trying. */
+const MAX_SETTINGS_ATTEMPTS = 6
+
+/** Public account menu and General controls only; no site APIs or storage. */
+export function adaptWebsiteSettings(doc: Document, trigger: HTMLElement | null, command: WebsiteCommand) {
   const root = doc.documentElement
   const attr = (name: string) => `data-dsh-chat-settings-${name}`
   // Remove the discarded embedded-settings presentation on an existing guest.
@@ -23,16 +26,34 @@ export function adaptWebsiteSettings(doc: Document, profile: HTMLElement | null,
     && !el.querySelector('textarea,[contenteditable="true"]')
   const dialog = [...doc.querySelectorAll<HTMLElement>('[role="dialog"],.ds-modal-content')].find(isModal)
   const closeDialog = () => dialog && [...dialog.querySelectorAll<HTMLElement>('button,[role="button"],.ds-icon-button')].find(el => !el.textContent?.trim() && el.querySelector('svg'))?.click()
-  const openProfileMenu = () => {
-    const trigger = profile?.querySelector('img') ?? (profile?.matches('button,[role="button"],[aria-haspopup]') ? profile : null) ?? profile?.querySelector('[aria-haspopup="menu"]')
-    ;(trigger as HTMLElement | undefined)?.click()
-  }
+  // The caller hands us the exact row element it verified as the public account
+  // trigger, so opening the menu never guesses an ancestor or a random image.
+  const openProfileMenu = () => { trigger?.click() }
+  // A settings session exists only because the user opened CHAT settings and it
+  // asked the guest to read or change the site's own public controls. The mark is
+  // what lets the multi-poll state machine continue; nothing else may start one.
+  const sessionMarker = 'data-dsh-chat-settings-session'
+  const attemptsMarker = 'data-dsh-chat-settings-attempts'
+  const explicit = command.type === 'settings-read' || command.type === 'setting'
+    || command.type === 'preferences' || command.type === 'logout'
+  if (explicit) root.setAttribute(sessionMarker, '')
   const request = (goal: string) => {
+    // This state machine clicks the site's own account menu and Settings dialog.
+    // A target that never answers must stop after a few bounded runs instead of
+    // reopening that UI forever.
+    const used = Number(root.getAttribute(attemptsMarker))
+    const attempts = Number.isFinite(used) && used > 0 ? used : 0
+    if (attempts >= MAX_SETTINGS_ATTEMPTS) {
+      root.setAttribute(attr('error'), '官网设置多次未响应，已停止自动同步；可点「显示官网原界面」手动修改后收起。')
+      return
+    }
+    root.setAttribute(attemptsMarker, String(attempts + 1))
+    root.setAttribute(sessionMarker, '')
     root.setAttribute(attr('request'), goal); root.removeAttribute(attr('phase')); root.removeAttribute(attr('error'))
     root.setAttribute(attr('deadline'), String(Date.now() + 12000))
   }
   const loggingOut=root.getAttribute(attr('request'))==='logout'
-  if (command.type === 'settings-close' && !loggingOut) {closeDialog(); root.removeAttribute(attr('request'));root.removeAttribute(attr('phase'));root.removeAttribute(attr('deadline'));root.removeAttribute(attr('error'))}
+  if (command.type === 'settings-close' && !loggingOut) {closeDialog(); root.removeAttribute(sessionMarker);root.removeAttribute(attemptsMarker); root.removeAttribute(attr('request'));root.removeAttribute(attr('phase'));root.removeAttribute(attr('deadline'));root.removeAttribute(attr('error'))}
   if (command.type === 'settings-read' && !root.hasAttribute(attr('request'))) request('read')
   if (command.type === 'setting' && !loggingOut) request(`${command.key}:${command.value}`)
   if (command.type === 'preferences' && !loggingOut) {
@@ -64,7 +85,11 @@ export function adaptWebsiteSettings(doc: Document, profile: HTMLElement | null,
   const theme = selectedTheme?.textContent?.trim().slice(0, 80) || null
   if (language) root.setAttribute('data-dsh-chat-language', language)
   if (theme) root.setAttribute('data-dsh-chat-theme', theme)
-  if (!root.hasAttribute(attr('request')) && !root.hasAttribute(attr('error')) && command.type !== 'settings-close') {
+  // Continue an open settings session only. This chain used to run on every
+  // background poll, which reopened the site's account menu and Settings dialog
+  // forever and made the CHAT page flash; it is now confined to a session the
+  // user opened, and bounded by MAX_SETTINGS_ATTEMPTS.
+  if (root.hasAttribute(sessionMarker) && !root.hasAttribute(attr('request')) && !root.hasAttribute(attr('error')) && command.type !== 'settings-close') {
     if (!root.hasAttribute('data-dsh-chat-dark-complete')) request('theme:dark')
     else if (root.hasAttribute(attr('restore-language'))) request(`language:${root.getAttribute(attr('restore-language'))}`)
   }

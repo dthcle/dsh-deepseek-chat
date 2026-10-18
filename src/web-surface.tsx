@@ -3,8 +3,9 @@ import { createElement, useCallback, useEffect, useRef, useState } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DesktopBrowserBridge, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DshChatStyles, useDshChat, type DshChatBridgeProps } from './ui.js'
-import { emptyNavigation, parseWebsiteNavigation, websiteCommandScript, type WebsiteCommand } from './website-navigation.js'
+import { emptyNavigation, hostDiagnostic, parseWebsiteNavigation, websiteCommandScript, type WebsiteCommand } from './website-navigation.js'
 import { parseWebsiteSession, websiteSessionCaptureScript, websiteSessionRestoreScript } from './website-session.js'
+import { websitePromptScript } from './website-prompt.js'
 
 const WEBSITE_URL = 'https://chat.deepseek.com/'
 
@@ -77,6 +78,8 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
   const guest = useRef<WebsiteWebview | null>(null)
   const guestEvents = useRef<AbortController | null>(null)
   const retryGuestSession = useRef<(() => void) | null>(null)
+  const installPrompt = useRef<(() => void) | null>(null)
+  const systemPrompt = useRef(state.systemPrompt)
   const lastReload = useRef(state.websiteReloadRevision)
 
   useEffect(() => {
@@ -117,6 +120,7 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
       guestEvents.current = null
       guest.current = null
       retryGuestSession.current = null
+      installPrompt.current = null
       if (held !== undefined) release(held)
     }
   }, [bridge, nativeBrowser, requestedGeneration, state.authorizationGeneration, state.accountStorageKey, recoveryRevision])
@@ -164,7 +168,9 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
       documentRevision++
       documentPresented=false
       setPresentationReady(false)
-      bridge.reportWebsiteNavigation(generation, emptyNavigation(), true)
+      // Publish the host's own frame: a replaced document stays visible in CHAT
+      // settings instead of the old, misleading "no diagnostic yet" placeholder.
+      bridge.reportWebsiteNavigation(generation, {...emptyNavigation(), diagnostic: hostDiagnostic(documentRevision)}, true)
     }
     let reading = false
     let queued = Promise.resolve()
@@ -184,6 +190,13 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
     const approvedOrigin = () => {
       try { return new URL(current.getURL()).origin==='https://chat.deepseek.com' } catch { return false }
     }
+    // The outbound-prompt hook belongs to one guest document; reinstall it
+    // whenever the page reloads and whenever the preference changes.
+    const applyPrompt = () => {
+      if (events.signal.aborted || !approvedOrigin()) return
+      void executeScript(websitePromptScript(systemPrompt.current)).catch(() => {})
+    }
+    installPrompt.current = applyPrompt
     const prepareSession = async (): Promise<boolean> => {
       if(restorationAttempted) return true
       restorationAttempted=true
@@ -240,8 +253,9 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
       if (snapshot.websiteAuthenticationStatus==='signing-out' && command.type!=='logout' && command.type!=='snapshot') return
       try {
         if(!approvedOrigin() || !await prepareSession() || !currentProjection()) return
-        const result = parseWebsiteNavigation(await execute(command))
+        let result = parseWebsiteNavigation(await execute(command))
         if(!currentProjection()) return
+        if (result.diagnostic !== undefined) result = {...result, diagnostic: {...result.diagnostic, documents: documentRevision}}
         // Keep this document's first usable presentation through transient DOM
         // loading. Only a real document replacement clears navigation and paint.
         if(documentPresented && result.status==='loading' && result.authenticated!==true) return
@@ -271,7 +285,7 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
           documentPresented=true
           // A failed DOM projection cannot prove that the website signed out.
           // Drop only unconfirmed navigation and keep the real website usable.
-          bridge.reportWebsiteNavigation(generation, { status: 'unsupported', conversations: [], selectedHref: null, canCreate: false, error: null })
+          bridge.reportWebsiteNavigation(generation, { status: 'unsupported', conversations: [], selectedHref: null, canCreate: false, error: null, diagnostic: hostDiagnostic(documentRevision) })
           setPresentationReady(!snapshot.settingsOpen)
           if (currentProjection()) {
             try { await execute({type:'restore'}) } catch { /* Polling probes the recovered page without restarting its first paint. */ }
@@ -336,6 +350,7 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
     current.addEventListener('dom-ready', () => {
       if (!bootstrapped) { bootstrapped = true; navigate(WEBSITE_URL) }
       else { resetDocumentPresentation(); syncNavigation() }
+      applyPrompt()
     }, { signal: events.signal })
     current.addEventListener('did-start-navigation', event => {
       const navigation = event as Event & { readonly isMainFrame?: boolean; readonly isInPlace?: boolean }
@@ -349,14 +364,14 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
       if ((event as Event & { readonly isMainFrame?: boolean }).isMainFrame !== true) return
       fastPollingUntil=Date.now()+8000;syncNavigation()
     }, { signal: events.signal })
-    current.addEventListener('did-stop-loading', () => { report(false); syncNavigation() }, { signal: events.signal })
+    current.addEventListener('did-stop-loading', () => { report(false); syncNavigation(); applyPrompt() }, { signal: events.signal })
     current.addEventListener('did-fail-load', event => {
       const failure = event as Event & { readonly isMainFrame?: boolean; readonly errorCode?: number }
       if (failure.isMainFrame === true && failure.errorCode !== -3) report(false, 'DeepSeek 网页加载失败。请检查网络后重试。')
     }, { signal: events.signal })
     current.addEventListener('render-process-gone', () => {
       needsRecovery.current = true
-      bridge.reportWebsiteNavigation(generation, { status: 'unsupported', conversations: [], selectedHref: null, canCreate: false, error: null })
+      bridge.reportWebsiteNavigation(generation, { status: 'unsupported', conversations: [], selectedHref: null, canCreate: false, error: null, diagnostic: hostDiagnostic(documentRevision) })
       report(false, '网页进程已退出，请点击「重试网页」。')
     }, { signal: events.signal })
     const offOpen = nativeBrowser.onOpenRequested(reservation.native.lease, url => {
@@ -397,6 +412,11 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
   useEffect(() => {
     if(state.mode==='chat' && state.viewport) bridge.commandWebsite({type:'snapshot',showOriginal:state.showWebsiteNavigation,headerInset:headerInset(state.viewport)})
   }, [bridge,state.mode,state.viewport?.left])
+
+  useEffect(() => {
+    systemPrompt.current = state.systemPrompt
+    installPrompt.current?.()
+  }, [state.systemPrompt])
 
   useEffect(() => () => { guestEvents.current?.abort() }, [])
 

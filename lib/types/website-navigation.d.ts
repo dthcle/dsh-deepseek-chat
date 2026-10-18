@@ -20,6 +20,39 @@ export interface WebsiteNavigation {
         pending?: boolean;
         restored?: boolean;
     };
+    /** Bounded, text-free view of the guest adapter's own state for the settings page. */
+    readonly diagnostic?: WebsiteDiagnostic;
+}
+/** Counts, enums and booleans only: never page text, titles or account values. */
+export interface WebsiteDiagnostic {
+    readonly status: WebsiteNavigation['status'];
+    readonly authenticated: boolean | undefined;
+    readonly profile: boolean;
+    readonly sidebar: boolean;
+    readonly newChat: boolean;
+    readonly conversations: number;
+    readonly appearanceRequest: string | null;
+    readonly appearancePhase: string | null;
+    readonly appearanceRemainingMs: number;
+    readonly appearanceDark: boolean;
+    readonly appearanceError: boolean;
+    readonly appearanceRestored: boolean;
+    /** Which public proof produced `authenticated`: the avatar/footer, the confirmed navigation column, or none. */
+    readonly proof: 'avatar' | 'navigation' | 'none';
+    /** `<img>` elements currently inside the confirmed navigation column. */
+    readonly trackImages: number;
+    readonly fallback: boolean;
+    readonly missingSidebarMs: number;
+    readonly authenticatedMs: number;
+    /** Per-document tallies: they separate a permanently failing gate from a flapping one. */
+    readonly polls: number;
+    readonly boundaryFailures: number;
+    readonly identifiedPolls: number;
+    readonly anonymousPolls: number;
+    readonly appearanceBlocks: number;
+    readonly fallbacks: number;
+    /** Main-frame documents this guest has presented; a climbing number means reloads. */
+    readonly documents: number;
 }
 export type WebsiteCommand = {
     readonly type: 'snapshot';
@@ -60,6 +93,12 @@ export type WebsiteCommand = {
     readonly type: 'restore';
 };
 export declare const emptyNavigation: () => WebsiteNavigation;
+/**
+ * The host's own frame, published as soon as it replaces a document and whenever
+ * its adapter fails. CHAT settings must always have something to show: the older
+ * "no diagnostic yet" placeholder hid exactly the reload loops it had to reveal.
+ */
+export declare const hostDiagnostic: (documents: number) => WebsiteDiagnostic;
 /** This function is serialized into our isolated guest. Keep all helpers inside it. */
 export declare function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'origin' | 'pathname'>, command: WebsiteCommand): WebsiteNavigation;
 export declare function websiteCommandScript(command: WebsiteCommand): string;

@@ -1,3 +1,27 @@
+## 0.1.29 适配 DSH 0.2.1-rc.2（2026-10-18，已安装 desktop，待验收）
+
+DSH 自动升级 0.2.0-rc.2 → 0.2.1-rc.2，插件被启动门禁拒绝。根因（从 app-boot 源码确证）：门禁 `evaluatePluginCompatibility` 在无 `engines.dsh` 时遍历 `peerDependencies` 里所有 `@deepseek-ai/dsh*` 并用 includePrerelease 比对；本插件把 dsh-credentials / dsh-typert-protocol / dsh-typert-registry 钉死为精确 `0.2.0-rc.2`，对 0.2.1-rc.2 全部 unmet。修法跟生态约定：peer 改 `^0.2.0-rc.2`（dsh-ops 同款范围已被证明可通过），devDeps 仍钉 0.2.1-rc.2 作为编译目标；不加 engines.dsh（会完全忽略 peers）。核查结果：tsc 0 错误、五个 slot 名仍在、4 个 shared external 仍在 → **无业务代码 API 断裂**。顺带修掉两个长期被沙箱掩盖的环境缺陷：build.mjs 的 Windows 路径分隔符 bug（`endsWith('/client.js')` → `path.basename`）、test.mjs 的 ui stub 缺 guardHarnessSearchReplay + tmpdir 不可写（改用仓库内 .test-build-*）。构建/分发通过；测试 6 pass/27 fail 与基线逐项相同无新增失败；装 desktop 后官方 CLI 对我们的插件已无 incompatibility 告警。版本 0.1.28 → 0.1.29。
+
+## 0.1.28 撤回后台设置自动化 + 有界首帧（2026-10-15，已安装 desktop，已被 0.1.29 取代）
+
+用户报「尚未收到诊断」「CHAT 页面一直在刷新」。归因：0.1.27 首次拿到头像证明，连带首次打开了两个从未在本机跑通的开关——外观门限（用深色完成挡首帧）与 adaptWebsiteSettings（点官网账号行/设置弹窗），而 website-settings 的「深色→语言」链在每个后台轮询都会重开官网设置界面。已把设置交互收进 `data-dsh-chat-settings-session`（仅显式命令可开启，MAX_SETTINGS_ATTEMPTS=6 上限），`settings` 无会话时为 undefined；首帧门限改为有界 `FIRST_PAINT_GRACE_MS=6s`（顺带修掉 authenticated===undefined 时 body 永久 opacity:0 的空白页隐患）；新增 `WebsiteDiagnostic.documents` 与 `hostDiagnostic()`，宿主替换文档/adapter 失败也发布诊断，「尚未收到诊断」不再出现，诊断新增「页面加载次数」。client 的 readSettingsWhenReady 去掉 settings===undefined 前置，改为打开 CHAT设置即发起会话。已装 desktop 0.1.28，待完整重启验收。
+
+## 0.1.27 支持文字/CSS 头像（2026-10-15，已安装 desktop，已被 0.1.28 取代）
+
+用户 DOM 证明官网头像是一个文字 D（无 img），旧识别靠 querySelectorAll(img) 全空转。已重写为 textLeaves + avatarShape（8..80px 近似正方形）+ triggerOf，接受 img 或短文本正方形头像；昵称=除头像外唯一叶子。账号名会变成官网掩码邮箱。已装 0.1.27，待完整重启验收。
+## 0.1.26 修复 0.1.25 的设置自动化越界（2026-10-15，已安装 desktop，待验收）
+
+0.1.25 让结构证明置真 authenticated，连带激活了本来只在有头像证明时才允许运行的设置/外观自动化；本机 profile=null，自动化乱点官网设置入口导致布局破坏并回退成 unsupported + 官网原界面。0.1.26 把设置自动化前提改回严格头像证明，并给 client 偏好恢复加 settings===undefined 守卫，另加「显示官网原界面」按钮供换账号。已装 desktop 0.1.26，待完整重启验收。
+## 0.1.25 账号识别修复（2026-10-15，已被 0.1.26 取代）
+
+用户诊断截图证明：侧栏与 100 条对话可读，但头像账号识别 351 次采样 0 成功，导致 authenticated=unknown、列表不显示。已加结构证明（导航列+新会话+对话链接）作为 authenticated 的第二来源，头像证明仍管账号名，外观同步门限只在有头像证明时生效。已装 desktop 0.1.25，待完整重启验收。
+## 0.1.24 官网识别诊断（2026-10-15，已安装 desktop）
+
+用户报登录已通、列表一直「正在加载官网对话」。本轮给官网识别加 WebsiteDiagnostic（枚举/布尔/计数）与文档级计数，并把外观同步改为 8 秒有界；未实机验证，不断言修复。已在用户确认后装到 desktop（0.1.24，profile spec 指向 artifacts/dsh-deepseek-chat-0.1.24.tgz），待完整重启后实机验收。
+## 0.1.23 本机候选（2026-10-15，本地已安装，未 Git/npm）
+
+用户报「点 CHAT 瞬间弹回 HARNESS」「CHAT设置一直正在登录」，并要求新增官网系统提示词注入。本轮交付诊断轨迹 + 两处稳健化 + `systemPrompt` 注入；根因未实机证实，等待用户按「CHAT设置 → 模式切换诊断」回报。发现：本机沙箱禁止子进程管道 stdio，esbuild JS API（build.mjs / test.mjs）会 spawn EPERM，需改用直接调用平台 esbuild.exe 的临时脚本或提权。详见 handoff 顶部。
+
 ## 0.1.22 已发布 npm（2026-10-14）
 
 用户明确授权发布语言配置命名空间修复，完成新的单次 2FA。公开 latest=0.1.22，下载包 SHA256=9551e973460bc29974ce1c1216989bb77fc60a17b060731a8e660133ee4f30c2，与本地发布包完全一致；公开包中的配置读取按 HOST_ENTRY_ID=deepseek-chat，且 Cordis 条目标识匹配。构建/分发及此前真实 DSH 完整重启中文恢复通过。未 Git 提交/推送。

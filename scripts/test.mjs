@@ -9,7 +9,9 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const testsDirectory = path.join(projectRoot, 'tests')
 const files = (await readdir(testsDirectory)).filter(file => file.endsWith('.test.ts')).sort()
 if (files.length === 0) throw new Error('No tests/*.test.ts files found')
-const outputDirectory = await mkdtemp(path.join(tmpdir(), 'dsh-chat-tests-'))
+// The system temp directory can be unwritable (restricted ACLs, sandbox): build
+// the test bundles inside the project instead, which is always the working tree.
+const outputDirectory = await mkdtemp(path.join(projectRoot, '.test-build-'))
 let exitCode = 1
 try {
   await build({
@@ -31,8 +33,10 @@ try {
           return { path: args.path, namespace: 'client-di-fixture' }
         })
         plugin.onLoad({ filter: /.*/, namespace: 'client-di-fixture' }, args => ({
+          // Keep this stub in step with the real export list: a newly imported
+          // symbol surfaces here as a bundling failure, not a test failure.
           contents: args.path === './ui.js'
-            ? 'export const DshChatBrandName = () => null; export const DshChatBrandControl = () => null; export const DshChatChatNavigation = () => null; export const DshChatChatPanel = () => null; export const DshChatLeadingControls = () => null; export const DshChatChatSettings = () => null;'
+            ? 'export const DshChatBrandName = () => null; export const DshChatBrandControl = () => null; export const DshChatChatNavigation = () => null; export const DshChatChatPanel = () => null; export const DshChatLeadingControls = () => null; export const DshChatChatSettings = () => null; export const guardHarnessSearchReplay = () => null;'
             : 'export const DshChatWebSurface = () => null;',
           loader: 'js',
         }))

@@ -19,7 +19,44 @@ export interface WebsiteNavigation {
   readonly error: string | null
   readonly accountName?: string | null
   readonly settings?: {language: string | null; theme: string | null; error: string | null; pending?: boolean; restored?: boolean }
+  /** Bounded, text-free view of the guest adapter's own state for the settings page. */
+  readonly diagnostic?: WebsiteDiagnostic
 }
+
+/** Counts, enums and booleans only: never page text, titles or account values. */
+export interface WebsiteDiagnostic {
+  readonly status: WebsiteNavigation['status']
+  readonly authenticated: boolean | undefined
+  readonly profile: boolean
+  readonly sidebar: boolean
+  readonly newChat: boolean
+  readonly conversations: number
+  readonly appearanceRequest: string | null
+  readonly appearancePhase: string | null
+  readonly appearanceRemainingMs: number
+  readonly appearanceDark: boolean
+  readonly appearanceError: boolean
+  readonly appearanceRestored: boolean
+  /** Which public proof produced `authenticated`: the avatar/footer, the confirmed navigation column, or none. */
+  readonly proof: 'avatar' | 'navigation' | 'none'
+  /** `<img>` elements currently inside the confirmed navigation column. */
+  readonly trackImages: number
+  readonly fallback: boolean
+  readonly missingSidebarMs: number
+  readonly authenticatedMs: number
+  /** Per-document tallies: they separate a permanently failing gate from a flapping one. */
+  readonly polls: number
+  readonly boundaryFailures: number
+  readonly identifiedPolls: number
+  readonly anonymousPolls: number
+  readonly appearanceBlocks: number
+  readonly fallbacks: number
+  /** Main-frame documents this guest has presented; a climbing number means reloads. */
+  readonly documents: number
+}
+
+/** Identification may hold the first paint only this long; the page must never stay blank. */
+const FIRST_PAINT_GRACE_MS = 6_000
 export type WebsiteCommand = { readonly type: 'snapshot'; readonly showOriginal: boolean; readonly headerInset?: number }
   | { readonly type: 'open'; readonly href: string }
   | { readonly type: 'conversation-action'; readonly href: string; readonly action: 'rename' | 'pin' | 'unpin' | 'share' | 'delete'; readonly title?: string }
@@ -32,12 +69,28 @@ export type WebsiteCommand = { readonly type: 'snapshot'; readonly showOriginal:
 
 export const emptyNavigation = (): WebsiteNavigation => ({ status: 'loading', authenticated: false, conversations: [], selectedHref: null, canCreate: false, error: null })
 
+/**
+ * The host's own frame, published as soon as it replaces a document and whenever
+ * its adapter fails. CHAT settings must always have something to show: the older
+ * "no diagnostic yet" placeholder hid exactly the reload loops it had to reveal.
+ */
+export const hostDiagnostic = (documents: number): WebsiteDiagnostic => ({
+  status: 'loading', authenticated: undefined, profile: false, sidebar: false, newChat: false, conversations: 0,
+  appearanceRequest: null, appearancePhase: null, appearanceRemainingMs: 0,
+  appearanceDark: false, appearanceError: false, appearanceRestored: false,
+  proof: 'none', trackImages: 0, fallback: false, missingSidebarMs: 0, authenticatedMs: 0,
+  polls: 0, boundaryFailures: 0, identifiedPolls: 0, anonymousPolls: 0, appearanceBlocks: 0, fallbacks: 0,
+  documents: Number.isFinite(documents) && documents > 0 ? Math.round(documents) : 0,
+})
+
 /** This function is serialized into our isolated guest. Keep all helpers inside it. */
 export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'origin' | 'pathname'>, command: WebsiteCommand): WebsiteNavigation {
   const origin = 'https://chat.deepseek.com'
   const marker = 'data-dsh-chat-navigation'
   const presentedMarker = 'data-dsh-chat-presented'
   const missingSidebarMarker = 'data-dsh-chat-sidebar-missing-at'
+  const authSinceMarker = 'data-dsh-chat-auth-since'
+  const preparingMarker = 'data-dsh-chat-preparing'
   const fallbackMarker = 'data-dsh-chat-fallback'
   const fallbackErrorMarker = 'data-dsh-chat-fallback-error'
   const profileMarker = 'data-dsh-chat-profile'
@@ -49,7 +102,7 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
   const conversationError = '该对话不在当前官网列表，请刷新列表。'
   const styleId = 'dsh-chat-website-navigation-style'
   const preparingStyleId = 'dsh-chat-website-preparing-style'
-  const owned = [marker, presentedMarker, missingSidebarMarker, fallbackMarker, fallbackErrorMarker, profileMarker, profileProofMarker, profileAvatarMarker, navigationWidthMarker, expandingMarker, compactToggleMarker, 'data-dsh-chat-native-collapse-attempt', 'data-dsh-chat-action-menu', 'data-dsh-chat-conversation-error', 'data-dsh-chat-layout', 'data-dsh-chat-content', 'data-dsh-chat-web-chrome', 'data-dsh-chat-settings-dialog', 'data-dsh-chat-settings-host', 'data-dsh-chat-settings-tabs', 'data-dsh-chat-settings-pane', 'data-dsh-chat-settings-layout', 'data-dsh-chat-settings-chrome', 'data-dsh-chat-settings-appearance', 'data-dsh-chat-header-row', 'data-dsh-chat-header-title', 'data-dsh-chat-header-share', 'data-dsh-chat-header-title-host', 'data-dsh-chat-header-editor', 'data-dsh-chat-header-native-depth']
+  const owned = [marker, presentedMarker, missingSidebarMarker, fallbackMarker, fallbackErrorMarker, profileMarker, profileProofMarker, profileAvatarMarker, navigationWidthMarker, expandingMarker, compactToggleMarker, 'data-dsh-chat-native-collapse-attempt', 'data-dsh-chat-action-menu', 'data-dsh-chat-conversation-error', 'data-dsh-chat-layout', 'data-dsh-chat-content', 'data-dsh-chat-web-chrome', 'data-dsh-chat-settings-dialog', 'data-dsh-chat-settings-host', 'data-dsh-chat-settings-tabs', 'data-dsh-chat-settings-pane', 'data-dsh-chat-settings-layout', 'data-dsh-chat-settings-chrome', 'data-dsh-chat-settings-appearance', 'data-dsh-chat-header-row', 'data-dsh-chat-header-title', 'data-dsh-chat-header-share', 'data-dsh-chat-header-title-host', 'data-dsh-chat-header-editor', 'data-dsh-chat-header-native-depth', authSinceMarker]
   const empty = (status: WebsiteNavigation['status']): WebsiteNavigation => ({ status, ...(status === 'sign-in' ? { authenticated: false } : {}), conversations: [], selectedHref: null, canCreate: false, error: null })
   const clearSettings = (preserveConfirmedPreferences = false) => {
     const confirmed = ['data-dsh-chat-language', 'data-dsh-chat-theme', 'data-dsh-chat-dark-complete', 'data-dsh-chat-settings-restored']
@@ -71,6 +124,7 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
     })
   }
   const fallback = (error: 'open' | null = null): WebsiteNavigation => {
+    bump('fallback')
     // Leave confirmed public preferences intact when revealing the original
     // website. A later structural recovery must not restart completed settings.
     const preserveRecovery = page.origin === origin && !/^\/sign_in\/?$/.test(page.pathname) && command.type !== 'restore'
@@ -84,7 +138,39 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
   }
   const fallbackNavigation = (): WebsiteNavigation => ({ ...empty('unsupported'), error: doc.documentElement.getAttribute(fallbackErrorMarker) === 'open' ? conversationError : null })
   const isOriginalSnapshot = command.type === 'snapshot' && command.showOriginal
+  // Per-document tallies live in plain attributes: they survive restore()/fallback
+  // within one document and never carry page text.
+  const diagRoot = doc.documentElement
+  const diagKey = (name: string) => `data-dsh-chat-diag-${name}`
+  const diagCount = (name: string): number => {
+    const value = Number(diagRoot.getAttribute(diagKey(name)))
+    return Number.isFinite(value) && value > 0 ? value : 0
+  }
+  const bump = (name: string): void => { diagRoot.setAttribute(diagKey(name), String(diagCount(name) + 1)) }
+  // Every early return publishes this frame so a failing gate stays visible in
+  // CHAT settings instead of silently reporting "no diagnostic yet".
+  const baseDiagnostic = (status: WebsiteNavigation['status']): WebsiteDiagnostic => {
+    const since = Number(diagRoot.getAttribute(missingSidebarMarker))
+    const authSince = Number(diagRoot.getAttribute(authSinceMarker))
+    return {
+      status, authenticated: undefined, profile: false, sidebar: sidebar !== null, newChat: newChat !== null, conversations: 0,
+      proof: 'none', trackImages: track.querySelectorAll('img').length,
+      appearanceRequest: diagRoot.getAttribute('data-dsh-chat-settings-request'),
+      appearancePhase: diagRoot.getAttribute('data-dsh-chat-settings-phase'),
+      appearanceRemainingMs: Math.max(0, Number(diagRoot.getAttribute('data-dsh-chat-settings-deadline')) - Date.now()) || 0,
+      appearanceDark: diagRoot.hasAttribute('data-dsh-chat-dark-complete'),
+      appearanceError: diagRoot.hasAttribute('data-dsh-chat-settings-error'),
+      appearanceRestored: diagRoot.hasAttribute('data-dsh-chat-settings-restored'),
+      fallback: diagRoot.hasAttribute(fallbackMarker),
+      missingSidebarMs: Number.isFinite(since) && since > 0 ? Date.now() - since : 0,
+      authenticatedMs: Number.isFinite(authSince) && authSince > 0 ? Date.now() - authSince : 0,
+      polls: diagCount('polls'), boundaryFailures: diagCount('boundary'), identifiedPolls: diagCount('identified'),
+      anonymousPolls: diagCount('anonymous'), appearanceBlocks: diagCount('appearance'), fallbacks: diagCount('fallback'),
+      documents: 0,
+    }
+  }
   if (page.origin !== origin) return fallback()
+  bump('polls')
   if (command.type !== 'restore') dismissWebsiteEnvironmentNotice(doc)
   if (command.type === 'restore' || (command.type === 'snapshot' && command.showOriginal)) {
     doc.dispatchEvent(new Event('dsh-chat-stop-adapting'))
@@ -119,9 +205,8 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
   if (/^\/sign_in\/?$/.test(page.pathname)) { restore(); return empty('sign-in') }
   // Gate only the document's first adapted paint. Later appearance checks must
   // leave the presented website and its environment/security notices visible.
-  if (!isOriginalSnapshot && !recovering && !doc.documentElement.hasAttribute(presentedMarker)
-    && !doc.documentElement.hasAttribute('data-dsh-chat-dark-complete')) {
-    doc.documentElement.setAttribute('data-dsh-chat-preparing','')
+  if (!isOriginalSnapshot && !recovering && !doc.documentElement.hasAttribute(presentedMarker)) {
+    if (!doc.documentElement.hasAttribute(preparingMarker)) doc.documentElement.setAttribute(preparingMarker, String(Date.now()))
     if (!doc.getElementById(preparingStyleId)) {
       const style=doc.createElement('style'); style.id=preparingStyleId
       style.textContent='html[data-dsh-chat-preparing] body{opacity:0!important}'
@@ -291,9 +376,10 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
     && (confirmedBoundary || (trackRect.left >= -1 && trackRect.left <= 16
       && trackRect.width >= 160 && trackRect.width <= 480 && contentRect.left >= trackRect.right - 16))
   if (!boundedContent) {
+    bump('boundary')
     if (recovering) return fallbackNavigation()
     if (isOriginalSnapshot || structureExpired()) return fallback()
-    return empty('loading')
+    return { ...empty('loading'), diagnostic: baseDiagnostic('loading') }
   }
   doc.documentElement.removeAttribute(missingSidebarMarker)
   doc.documentElement.removeAttribute(expandingMarker)
@@ -306,29 +392,45 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
     doc.documentElement.setAttribute(presentedMarker, '')
   }
   const viewportHeight = doc.defaultView?.innerHeight ?? 0
-  const nicknameLeaf = (row: HTMLElement) => {
-    const texts = doc.createTreeWalker(row, 4)
-    let found: { element: HTMLElement; name: string } | null = null
-    let text: Node | null
-    while ((text = texts.nextNode())) {
-      const parent = text.parentElement
+  /** Bounded leaf texts of one small row: the account row holds an avatar plus one name. */
+  const textLeaves = (root: HTMLElement): { element: HTMLElement; text: string }[] => {
+    const found: { element: HTMLElement; text: string }[] = []
+    const texts = doc.createTreeWalker(root, 4)
+    let node: Node | null
+    while ((node = texts.nextNode())) {
+      const parent = node.parentElement
       const excluded = parent?.closest('svg,script,style,[hidden],[aria-hidden="true"]')
-      if (!parent || (excluded && row.contains(excluded))) continue
-      const name = (text.textContent ?? '').trim()
-      if (!name) continue
-      // Read one bounded nickname leaf, never the sidebar's aggregate text.
-      if (found || parent.childElementCount !== 0 || name.length > 100 || /[\r\n]/.test(name)) return null
-      found = { element: parent, name }
+      if (!parent || parent.childElementCount !== 0 || (excluded && root.contains(excluded))) continue
+      const text = (node.textContent ?? '').trim()
+      if (text) found.push({ element: parent, text })
     }
     return found
   }
-  const checkProfile = (row: HTMLElement, image: HTMLImageElement, geometry: boolean) => {
+  // The avatar is public presentation: an image, or the site's letter/CSS avatar,
+  // which is a short text leaf inside a roughly square box.
+  const avatarShape = (element: HTMLElement): boolean => {
+    const rect = element.getBoundingClientRect()
+    if (rect.width < 8 || rect.height < 8 || rect.width > 80 || rect.height > 80) return false
+    return Math.abs(rect.width - rect.height) <= Math.max(rect.width, rect.height) * .5
+  }
+  // The public trigger is the row's own interactive seat, never a guessed ancestor.
+  const triggerOf = (row: HTMLElement): HTMLElement =>
+    (row.matches('[aria-haspopup],[role="button"],[tabindex]') ? row : row.querySelector<HTMLElement>('[aria-haspopup],[role="button"],[tabindex]')) ?? row
+  const checkProfile = (row: HTMLElement, seed: HTMLElement, geometry: boolean) => {
     if (!row.isConnected || !track.contains(row) || row === sidebar || row === track || row === layout
-      || row.contains(newChat) || row.matches('a[href]') || image.closest('a[href]')
-      || row.querySelector('a[href],textarea,input,[contenteditable="true"],[role="menu"],[role="dialog"],.ds-dropdown-menu,.ds-modal-content')
-      || row.querySelectorAll('img').length !== 1 || !row.contains(image)) return null
+      || row.contains(newChat) || row.matches('a[href]') || seed.closest('a[href]')
+      || row.querySelector('a[href],textarea,input,[contenteditable="true"],[role="menu"],[role="dialog"],.ds-dropdown-menu,.ds-modal-content')) return null
+    const images = [...row.querySelectorAll<HTMLElement>('img')]
+    const leaves = textLeaves(row)
+    const avatar = images.length === 1 ? images[0]
+      : images.length === 0 && leaves.some(leaf => leaf.element === seed) && avatarShape(seed) ? seed
+        : null
+    if (!avatar) return null
+    // Exactly one bounded name leaf besides the avatar; never the row's aggregate text.
+    const names = leaves.filter(leaf => leaf.element !== avatar && leaf.text.length <= 100 && !/[\r\n]/.test(leaf.text))
+    if (names.length !== 1) return null
     if (geometry) {
-      const bounds = row.getBoundingClientRect(), avatarBounds = image.getBoundingClientRect(), column = track.getBoundingClientRect()
+      const bounds = row.getBoundingClientRect(), avatarBounds = avatar.getBoundingClientRect(), column = track.getBoundingClientRect()
       if (column.width < 160 || column.width > 480 || column.left < -1 || column.left > 16
         || bounds.top < viewportHeight * .75 || bounds.bottom > viewportHeight + 1 || bounds.height < 24 || bounds.height > 100
         || bounds.width < 80 || bounds.width > column.width + 1 || bounds.left < column.left - 1 || bounds.right > column.right + 1
@@ -336,26 +438,29 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
         || avatarBounds.left < bounds.left - 1 || avatarBounds.right > bounds.right + 1
         || avatarBounds.top < bounds.top - 1 || avatarBounds.bottom > bounds.bottom + 1) return null
     }
-    const nickname = nicknameLeaf(row)
-    return nickname ? { row, image, name: nickname.name } : null
+    return { row, avatar, name: names[0].text, trigger: triggerOf(row) }
   }
   type PublicProfile = NonNullable<ReturnType<typeof checkProfile>>
   let identifiedProfile: PublicProfile | null = null
   // Reuse only a row and avatar previously proven in a visible footer. Legacy
   // markers placed on whole columns carry no such proof and are removed.
   for (const candidate of doc.querySelectorAll<HTMLElement>(`[${profileMarker}]`)) {
-    const image = candidate.querySelector<HTMLImageElement>(`img[${profileAvatarMarker}]`)
-    const valid = candidate.getAttribute(profileProofMarker) === 'footer-v1' && image ? checkProfile(candidate, image, false) : null
+    const avatar = candidate.querySelector<HTMLElement>(`[${profileAvatarMarker}]`)
+    const valid = candidate.getAttribute(profileProofMarker) === 'footer-v1' && avatar ? checkProfile(candidate, avatar, false) : null
     if (!identifiedProfile && valid) identifiedProfile = valid
     else { candidate.removeAttribute(profileMarker); candidate.removeAttribute(profileProofMarker) }
   }
   const findVisibleProfile = (): PublicProfile | null => {
-    for (const image of track.querySelectorAll<HTMLImageElement>('img')) {
-      if (image.closest('a[href]')) continue
-      const bounds = image.getBoundingClientRect()
+    // Seeds are real images plus the site's letter/CSS avatars (short text leaves).
+    // Both stay bounded to the bottom quarter of the confirmed column.
+    const seeds: HTMLElement[] = [...track.querySelectorAll<HTMLElement>('img')]
+    for (const leaf of textLeaves(track)) if (leaf.text.length <= 2 && !/\s/.test(leaf.text)) seeds.push(leaf.element)
+    for (const seed of seeds) {
+      if (seed.closest('a[href]')) continue
+      const bounds = seed.getBoundingClientRect()
       if (bounds.top < viewportHeight * .75 || bounds.height < 8 || bounds.height > 80 || bounds.width < 8 || bounds.width > 80) continue
-      for (let row = image.parentElement, depth = 0; row && row !== track && depth < 5; row = row.parentElement, depth++) {
-        const valid = checkProfile(row, image, true)
+      for (let row = seed.parentElement, depth = 0; row && row !== track && depth < 5; row = row.parentElement, depth++) {
+        const valid = checkProfile(row, seed, true)
         if (valid) return valid
       }
     }
@@ -386,14 +491,9 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
   if (identifiedProfile) {
     profile!.setAttribute(profileMarker, '')
     profile!.setAttribute(profileProofMarker, 'footer-v1')
-    identifiedProfile.image.setAttribute(profileAvatarMarker, '')
+    identifiedProfile.avatar.setAttribute(profileAvatarMarker, '')
   }
   const accountName = identifiedProfile?.name ?? null
-  const authenticated = identifiedProfile ? true : undefined
-  // The sidebar and avatar may mount in separate React commits. Starting a
-  // profile-menu request before its trigger exists would leave its phase stuck.
-  // Wait for public profile evidence before performing any settings interaction.
-  const settings = authenticated === true ? adaptWebsiteSettings(doc, profile, command) : undefined
   const settingsRoot = doc.documentElement
   const conversations: WebsiteConversation[] = []
   let group = '对话'
@@ -411,6 +511,20 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
       if (href && title && !conversations.some(item => item.href === href)) conversations.push({ href, title, group })
     } else if (node.nodeType === 3 && groups.test((node.textContent ?? '').trim())) group = (node.textContent ?? '').trim()
   }
+  // The avatar/footer proof is the strict signal. The confirmed navigation column
+  // with its New Chat control and real conversation links is the structural one:
+  // a changed, hidden or background-image avatar must not hide a readable list.
+  const navigationProof = identifiedProfile === null && sidebar !== null && newChat !== null && conversations.length > 0
+  const authenticated = identifiedProfile !== null || navigationProof ? true : undefined
+  bump(identifiedProfile !== null ? 'identified' : 'anonymous')
+  // Settings automation keeps its original hard precondition (a verified
+  // avatar/footer trigger) and adds a second one: a session the user actually
+  // opened by visiting CHAT settings. A background poll may never reopen the
+  // site's own account menu or Settings dialog.
+  const settingsCommand = command.type === 'settings-read' || command.type === 'settings-close'
+    || command.type === 'setting' || command.type === 'preferences' || command.type === 'logout'
+  const settingsSession = settingsCommand || doc.documentElement.hasAttribute('data-dsh-chat-settings-session')
+  const settings = identifiedProfile !== null && settingsSession ? adaptWebsiteSettings(doc, identifiedProfile.trigger, command) : undefined
   if (command.type === 'open') {
     const target = safeHref(command.href)
     const link = [...sidebar.querySelectorAll<HTMLAnchorElement>('a[href]')].find(item => safeHref(item.getAttribute('href')) === target)
@@ -459,12 +573,34 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
   if (!(command.type === 'snapshot' && command.showOriginal)) adaptWebsiteHeader(doc, content, selected?.title ?? null, command.type === 'snapshot' ? command.headerInset ?? (Number.parseInt(settingsRoot.style.getPropertyValue('--dsh-chat-title-inset')) || 24) : Number.parseInt(settingsRoot.style.getPropertyValue('--dsh-chat-title-inset')) || 24)
   // A failed appearance sync must reveal the legitimate website and its own
   // environment/security notices. Keep the error retryable; do not claim dark mode.
-  const ready = authenticated !== true || settingsRoot.hasAttribute('data-dsh-chat-dark-complete') || Boolean(settings?.error) || (command.type==='snapshot' && command.showOriginal)
+  // The appearance sync drives the site's own settings UI, which is the most
+  // structure-dependent step. Bound it: an attempt that cannot finish keeps the
+  // site's own appearance but must never hide the real navigation indefinitely.
+  if (authenticated === true) {
+    if (!settingsRoot.hasAttribute(authSinceMarker)) settingsRoot.setAttribute(authSinceMarker, String(Date.now()))
+  } else settingsRoot.removeAttribute(authSinceMarker)
+  const authenticatedSince = Number(settingsRoot.getAttribute(authSinceMarker))
+  const authenticatedMs = Number.isFinite(authenticatedSince) && authenticatedSince > 0 ? Date.now() - authenticatedSince : 0
+  if (settings?.pending) bump('appearance')
+  // Only identification holds the first paint, and only for a bounded time: an
+  // account face we cannot read must reveal the real website, never a blank page.
+  // No settings or appearance step may keep it hidden any more.
+  const preparingSince = Number(settingsRoot.getAttribute(preparingMarker))
+  const preparingMs = Number.isFinite(preparingSince) && preparingSince > 0 ? Date.now() - preparingSince : 0
+  const ready = authenticated !== undefined || preparingMs >= FIRST_PAINT_GRACE_MS || (command.type==='snapshot' && command.showOriginal)
   if (ready) {
-    settingsRoot.removeAttribute('data-dsh-chat-preparing')
+    settingsRoot.removeAttribute(preparingMarker)
     if (!(command.type === 'snapshot' && command.showOriginal)) settingsRoot.setAttribute(presentedMarker, '')
   }
-  return { status: ready ? 'ready' : 'loading', ...(authenticated === undefined ? {} : { authenticated }), conversations, selectedHref: safeHref(page.pathname), canCreate: newChat !== null, error: doc.documentElement.getAttribute('data-dsh-chat-conversation-error'), accountName, settings }
+  const diagnostic: WebsiteDiagnostic = {
+    ...baseDiagnostic(ready ? 'ready' : 'loading'),
+    authenticated,
+    profile: identifiedProfile !== null,
+    proof: identifiedProfile !== null ? 'avatar' : navigationProof ? 'navigation' : 'none',
+    conversations: conversations.length,
+    authenticatedMs,
+  }
+  return { status: ready ? 'ready' : 'loading', ...(authenticated === undefined ? {} : { authenticated }), conversations, selectedHref: safeHref(page.pathname), canCreate: newChat !== null, error: doc.documentElement.getAttribute('data-dsh-chat-conversation-error'), accountName, settings, diagnostic }
 }
 
 export function websiteCommandScript(command: WebsiteCommand): string {
@@ -483,7 +619,28 @@ export function parseWebsiteNavigation(value: unknown): WebsiteNavigation {
     .map(item => ({ href: item.href, title: item.title.slice(0, 300), group: item.group.slice(0, 80) }))
   const authenticated = source.status === 'sign-in' ? false : source.authenticated === true ? true
     : source.authenticated === false ? false : undefined
-  return { status: source.status, ...(authenticated === undefined ? {} : { authenticated }), conversations: authenticated === true ? conversations : [], selectedHref: validHref(source.selectedHref) ? source.selectedHref : null,
+  // The guest payload is untrusted: keep counts, enums and booleans only.
+  const flag = (value: unknown): boolean => value === true
+  const label = (value: unknown): string | null => typeof value === 'string' && /^[a-z0-9:._-]{1,40}$/i.test(value) ? value : null
+  const span = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), 86_400_000) : 0
+  const raw = source.diagnostic as Partial<WebsiteDiagnostic> | undefined
+  const diagnostic: WebsiteDiagnostic | undefined = raw && typeof raw === 'object'
+    ? {
+      status: ['loading', 'ready', 'sign-in', 'unsupported'].includes(raw.status as string) ? raw.status as WebsiteNavigation['status'] : 'loading',
+      authenticated: raw.authenticated === true ? true : raw.authenticated === false ? false : undefined,
+      profile: flag(raw.profile), sidebar: flag(raw.sidebar), newChat: flag(raw.newChat), conversations: span(raw.conversations),
+      appearanceRequest: label(raw.appearanceRequest), appearancePhase: label(raw.appearancePhase),
+      appearanceRemainingMs: span(raw.appearanceRemainingMs),
+      appearanceDark: flag(raw.appearanceDark), appearanceError: flag(raw.appearanceError), appearanceRestored: flag(raw.appearanceRestored),
+      proof: raw.proof === 'avatar' || raw.proof === 'navigation' ? raw.proof : 'none',
+      trackImages: span(raw.trackImages),
+      fallback: flag(raw.fallback), missingSidebarMs: span(raw.missingSidebarMs), authenticatedMs: span(raw.authenticatedMs),
+      polls: span(raw.polls), boundaryFailures: span(raw.boundaryFailures), identifiedPolls: span(raw.identifiedPolls),
+      anonymousPolls: span(raw.anonymousPolls), appearanceBlocks: span(raw.appearanceBlocks), fallbacks: span(raw.fallbacks),
+      documents: span(raw.documents),
+    }
+    : undefined
+  return { status: source.status, ...(authenticated === undefined ? {} : { authenticated }), conversations: authenticated === true ? conversations : [], selectedHref: validHref(source.selectedHref) ? source.selectedHref : null, ...(diagnostic === undefined ? {} : { diagnostic }),
     accountName: authenticated === true && typeof source.accountName === 'string' ? source.accountName.slice(0,100) : null,
     settings: source.settings ? {language:typeof source.settings.language === 'string' ? source.settings.language.slice(0,80) : null,theme:typeof source.settings.theme === 'string' ? source.settings.theme.slice(0,80) : null,error:typeof source.settings.error === 'string' ? source.settings.error.slice(0,200) : null,pending:source.settings.pending===true,restored:source.settings.restored===true} : undefined,
     canCreate: authenticated === true && source.canCreate === true, error: typeof source.error === 'string' ? source.error.slice(0, 300) : null }
