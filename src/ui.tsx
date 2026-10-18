@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { acquireChatStyles, ensureChatStyles } from './styles.js'
+import type { ModeTraceEntry } from './core/mode.js'
 import type { WebsiteCommand, WebsiteNavigation } from './website-navigation.js'
 import type { WebsiteSession } from './protocol.js'
 
@@ -47,6 +48,8 @@ export interface DshChatViewState {
   readonly websiteNavigationRefreshing: boolean
   readonly websiteNavigationRefreshError: string | null
   readonly showWebsiteNavigation: boolean
+  readonly systemPrompt: string
+  readonly modeTrace: readonly ModeTraceEntry[]
 }
 
 export interface DshChatUIBridge {
@@ -55,6 +58,7 @@ export interface DshChatUIBridge {
   selectMode(mode: DshChatMode): void
   refreshAuthorization(): void
   manageAccount(): void
+  setSystemPrompt(value: string): void
   beginWebsiteSignIn(): void
   toggleSidebar(): void
   attachViewport(element: HTMLElement | null): void
@@ -112,8 +116,8 @@ export function DshChatModeSelector({ bridge, state, compact = false }: DshChatB
   return <div className={compact ? 'dsh-chat-mode-compact' : 'dsh-chat-mode-wrap'}>
     <fieldset className="dsh-chat-modes" disabled={!state.modeEnabled} aria-describedby={description}>
       <legend className="dsh-chat-sr-only">工作模式</legend>
-      <button type="button" aria-label="CHAT 官网聊天模式" aria-pressed={state.mode === 'chat'} onClick={() => bridge.selectMode('chat')} title={state.availabilityMessage}>{compact ? 'C' : 'CHAT'}</button>
-      <button type="button" aria-label="HARNESS 工作区模式" aria-pressed={state.mode === 'harness'} onClick={() => bridge.selectMode('harness')} title={state.availabilityMessage}>{compact ? 'H' : 'HARNESS'}</button>
+      <button type="button" aria-label="CHAT 官网聊天模式" aria-pressed={state.mode === 'chat'} onClick={event => { event.stopPropagation(); bridge.selectMode('chat') }} title={state.availabilityMessage}>{compact ? 'C' : 'CHAT'}</button>
+      <button type="button" aria-label="HARNESS 工作区模式" aria-pressed={state.mode === 'harness'} onClick={event => { event.stopPropagation(); bridge.selectMode('harness') }} title={state.availabilityMessage}>{compact ? 'H' : 'HARNESS'}</button>
     </fieldset>
     <span id={description} className="dsh-chat-sr-only">{state.availabilityMessage || '选择 CHAT 或 HARNESS 工作模式。'}</span>
   </div>
@@ -363,6 +367,53 @@ export function DshChatLeadingControls({bridge}: PropsRuntime<'shell.leading'> &
   </div>
 }
 
+
+/** One plain-text preference; the official page has no system-prompt field of its own. */
+function DshChatPromptField({ bridge, state }: DshChatBridgeProps & { readonly state: DshChatViewState }) {
+  const fieldId = useId()
+  const [draft, setDraft] = useState(state.systemPrompt)
+  const timer = useRef<number>()
+  useEffect(() => { setDraft(current => current === state.systemPrompt ? current : state.systemPrompt) }, [state.systemPrompt])
+  useEffect(() => () => { if (timer.current !== undefined) window.clearTimeout(timer.current) }, [])
+  const commit = (value: string) => {
+    if (timer.current !== undefined) window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => { bridge.setSystemPrompt(value) }, 600)
+  }
+  return <div className="dsh-chat-settings-card dsh-chat-settings-prompt">
+    <label htmlFor={fieldId}>CHAT 系统提示词</label>
+    <textarea id={fieldId} className="dsh-chat-settings-prompt-input" value={draft} rows={5} maxLength={4000}
+      placeholder="例如：始终用简体中文回答，先给结论再给步骤。"
+      onChange={event => { setDraft(event.target.value); commit(event.target.value) }}
+      onBlur={() => { if (timer.current !== undefined) window.clearTimeout(timer.current); bridge.setSystemPrompt(draft) }}/>
+    <p className="dsh-chat-settings-note">官网没有系统提示词入口，所以这段文字会附加在你每次发送的消息开头，官网页面本身也能看到它；不会读取或改写官网返回的内容。留空即关闭。</p>
+    {state.systemPrompt.length > 0 && <p className="dsh-chat-settings-progress" role="status">已启用，共 {state.systemPrompt.length} 个字。</p>}
+  </div>
+}
+
+/** Credential-free diagnostics: mode transitions plus the guest adapter's own bounded state. */
+function DshChatModeDiagnostics({ state }: { readonly state: DshChatViewState }) {
+  const diagnostic = state.websiteNavigation.diagnostic
+  const yes = (value: boolean) => value ? '有' : '无'
+  const mode = state.modeTrace.length === 0 ? '模式：暂无记录'
+    : '模式：\n' + state.modeTrace.map(entry => `${new Date(entry.at).toLocaleTimeString()} ${entry.event}${entry.detail ? ' · ' + entry.detail : ''}`).join('\n')
+  const site = diagnostic === undefined ? '官网：尚未收到诊断（还没进入 CHAT 网页，或官网页面未返回结构）。'
+    : [
+      '官网：',
+      `  status=${diagnostic.status} authenticated=${diagnostic.authenticated === undefined ? 'unknown' : String(diagnostic.authenticated)}`,
+      `  识别依据=${diagnostic.proof} 头像=${yes(diagnostic.profile)} 侧栏=${yes(diagnostic.sidebar)} 新会话=${yes(diagnostic.newChat)} 对话数=${diagnostic.conversations} 侧栏图片数=${diagnostic.trackImages}`,
+      `  官网设置 request=${diagnostic.appearanceRequest ?? '-'} phase=${diagnostic.appearancePhase ?? '-'} 剩余=${diagnostic.appearanceRemainingMs}ms 深色完成=${diagnostic.appearanceDark} 错误=${diagnostic.appearanceError} 已恢复=${diagnostic.appearanceRestored}`,
+      `  fallback=${diagnostic.fallback} 未识别侧栏=${diagnostic.missingSidebarMs}ms 已认证=${diagnostic.authenticatedMs}ms`,
+      `  本页累计 采样=${diagnostic.polls} 边界失败=${diagnostic.boundaryFailures} 识别到账号=${diagnostic.identifiedPolls} 未识别账号=${diagnostic.anonymousPolls} 设置同步中=${diagnostic.appearanceBlocks} 回退=${diagnostic.fallbacks}`,
+      `  页面加载次数=${diagnostic.documents}（持续增长即官网被反复重载）`,
+    ].join('\n')
+  return <details className="dsh-chat-settings-diagnostics">
+    <summary>诊断（模式切换 / 官网识别）</summary>
+    <p className="dsh-chat-settings-note">CHAT 进不去、官网对话列表一直加载或列表为空时，把下面两块内容一并反馈。</p>
+    <pre>{mode}</pre>
+    <pre>{site}</pre>
+  </details>
+}
+
 export function DshChatChatSettings({bridge,close}: PropsRuntime<'settings.section'> & DshChatBridgeProps) {
   const state = useDshChat(bridge)
   const enabled = state.desktopAvailable
@@ -378,7 +429,10 @@ export function DshChatChatSettings({bridge,close}: PropsRuntime<'settings.secti
   }
   const navigation=state.websiteNavigation
   const settings=navigation.settings
-  const showAccount=enabled && navigation.authenticated===true && !['signed-out','signing-in','signing-out'].includes(state.websiteAuthenticationStatus)
+  // Only the verified avatar/footer proof may claim an account: the account name,
+  // language sync and logout all depend on that trigger existing.
+  const accountProof=navigation.diagnostic===undefined || navigation.diagnostic.proof==='avatar'
+  const showAccount=enabled && accountProof && navigation.authenticated===true && !['signed-out','signing-in','signing-out'].includes(state.websiteAuthenticationStatus)
   const language=/中文|Chinese/i.test(settings?.language ?? '') ? 'zh-CN' : /English|英语/i.test(settings?.language ?? '') ? 'en' : /^(System|跟随系统|系统|Follow system)$/i.test(settings?.language ?? '') ? 'system' : ''
   return <section className="dsh-chat-settings"><DshChatStyles/><h2>CHAT设置</h2>
     {showAccount && <div className="dsh-chat-settings-card">
@@ -394,11 +448,14 @@ export function DshChatChatSettings({bridge,close}: PropsRuntime<'settings.secti
       {state.preferenceError && <p className="dsh-chat-settings-error" role="alert">{state.preferenceError}</p>}
       {state.websiteSessionError && <p className="dsh-chat-settings-error" role="alert">{state.websiteSessionError} {state.websiteAuthenticationStatus==='error' && /退出/.test(state.websiteSessionError) && <button type="button" onClick={()=>bridge.logoutWebsite()}>重试退出登录</button>}</p>}
     </div>}
+    {enabled && !showAccount && navigation.authenticated===true && state.websiteAuthenticationStatus==='signed-in' && <div className="dsh-chat-settings-card dsh-chat-settings-status"><strong role="status">CHAT 已登录</strong><p>官网页面已登录，左侧对话列表可用。插件本次没有识别到官网的账号区域（头像／昵称），所以这里不显示账号名、语言同步和退出登录。</p><p className="dsh-chat-settings-note">需要换账号或改官网自身设置时，可临时显示官网原界面，用完再点一次收起。</p><button type="button" className="dsh-chat-text-button" onClick={()=>bridge.toggleWebsiteNavigation()}>{state.showWebsiteNavigation ? '收起官网原界面' : '显示官网原界面'}</button>{state.websiteSessionStatus==='saved' && <p role="status">已记住网页登录。</p>}</div>}
     {!enabled && <p role="status">需要 DSH 桌面版的官方网页容器。</p>}
     {enabled && state.websiteAuthenticationStatus==='signed-out' && <div className="dsh-chat-settings-card dsh-chat-settings-status"><strong>CHAT 尚未登录</strong><p>登录会打开 CHAT 对话页面。完成官网登录后，这里的账号与官网对话会自动同步。</p><button type="button" className="dsh-chat-primary-button" onClick={signIn}>登录 DeepSeek</button></div>}
     {enabled && state.websiteAuthenticationStatus==='signing-in' && <div className="dsh-chat-settings-card dsh-chat-settings-status"><strong role="status">正在登录 DeepSeek</strong><p>请在 CHAT 对话页面完成官网登录。登录成功后，账号和登录记忆会自动同步。</p><button type="button" className="dsh-chat-primary-button" onClick={signIn}>继续登录</button></div>}
     {enabled && state.websiteAuthenticationStatus==='signing-out' && <div className="dsh-chat-settings-card dsh-chat-settings-status"><strong role="status">正在退出登录</strong><p>正在清除登录记忆并退出官网…</p></div>}
     {enabled && state.websiteAuthenticationStatus==='error' && !showAccount && <div className="dsh-chat-settings-card dsh-chat-settings-status"><strong>登录状态暂时无法同步</strong><p className="dsh-chat-settings-error" role="alert">{state.websiteSessionError || state.webError || '暂时无法确认官网登录状态，请重试。'}</p>{/退出/.test(state.websiteSessionError ?? '') ? <button type="button" className="dsh-chat-text-button" onClick={()=>bridge.logoutWebsite()}>重试退出登录</button> : <button type="button" className="dsh-chat-text-button" onClick={()=>bridge.reloadWebsite()}>重新加载</button>}</div>}
     {enabled && !showAccount && state.websiteAuthenticationStatus==='loading' && <div className="dsh-chat-settings-card dsh-chat-settings-status"><strong role="status">正在同步官网账号</strong><p>{state.webError || (navigation.status==='unsupported' ? '官网页面已打开，正在同步账号和对话列表…' : '正在识别 DeepSeek 官网登录状态…')}</p><button type="button" className="dsh-chat-text-button" onClick={()=>bridge.reloadWebsite()}>重新加载</button></div>}
+    {enabled && <DshChatPromptField bridge={bridge} state={state}/>}
+    <DshChatModeDiagnostics state={state}/>
   </section>
 }

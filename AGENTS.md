@@ -1,3 +1,26 @@
+## 0.2.5 把本地自定义功能合并到上游基线（2026-10-18，fork 维护）
+
+**维护模型**：本仓库 fork 自上游 `xingxingbk-git/dsh-deepseek-chat`。`main` = 上游 + 本仓库的自定义功能，由我们维护；今后仍可继续拉取上游更新（把上游 commit merge/rebase 进来）。允许增加和删除，但基线始终是上游。
+
+**为什么有这一轮**：此前 0.1.23–0.1.29 的全部工作只存在于本机工作区（未提交），一旦重装或换机即丢失。本轮先把它存成提交 f15588e（分支 `local/0.1.29`，标签 `backup/local-0.1.29`），再 rebase 到上游 0.2.4（69794fc）之上，版本 0.2.4 → **0.2.5**。
+
+**合入的自定义功能（上游 0.2.4 没有）**：
+- **系统提示词注入**：新增 `src/website-prompt.ts`。官网没有系统提示词入口，因此在 guest 内挂钩 fetch/XHR，只对同源 `chat.deepseek.com`、路径以 `/api/` 开头且含 `completion`、请求体为 JSON 且含字符串 `prompt` 的请求，把配置文字加在该 `prompt` 开头。文字不写日志、不落盘、不外发到其它地址。CHAT设置 提供输入框（600ms 防抖，上限 4000 字）。
+- **模式切换不再弹回 HARNESS**：`core/mode.ts` 增加 `ensureChatPanel`（main slot 丢失时重新注册）与 `selectPanel` 后回读校验，失败不再抛异常；另有有界 `modeTrace` 供诊断。
+- **官网账号识别重写**：官网头像是文字/CSS 方块而非 `<img>`，旧实现靠 `querySelectorAll('img')` 播种永远匹配不到。改为 `textLeaves` + `avatarShape`（8..80px 近似正方形）+ `triggerOf`，头像接受 `<img>` 或短文本方块，昵称取「除头像外唯一叶子」。
+- **设置自动化门控**：设置状态机会点击官网自己的账号菜单与设置弹窗；原先每个后台轮询都可能重新发起，导致官网界面反复开合、CHAT 页面持续闪烁。现改为 `data-dsh-chat-settings-session`（仅显式命令可开启）+ `MAX_SETTINGS_ATTEMPTS=6` 上限。
+- **首帧时间上界**：`FIRST_PAINT_GRACE_MS=6s`。上游用主题完成度挡首帧，我们额外加时间上界，避免「已识别账号 + 主题同步永不完成」时页面永久空白。
+- **诊断面板**：`ui.tsx` 增加无凭据诊断（模式轨迹 + 官网适配器状态，含页面加载次数，用于暴露重载循环）。
+- **构建/测试环境修复**：`build.mjs` 用 `path.basename` 判断产物（Windows 路径是反斜杠，原来的 `endsWith('/client.js')` 恒为 false）；`test.mjs` 补齐 `ui.js` stub 的 `guardHarnessSearchReplay`，并把产物目录从系统临时目录改到仓库内 `.test-build-*`。
+
+**冲突解决原则（尊重上游）**：
+- `package.json` 整体采用上游（上游已用 `engines.dsh` 枚举解决 DSH 兼容门禁），只改版本号。
+- 官网明暗跟随 HARNESS 主题按上游设计保留；我们的时间上界只作为附加保险叠加。
+- 设置自动链保留上游的「跟随宿主主题」目标，仅叠加会话门控与次数上限。
+- `README.md`/`README.en.md`/`AGENTS.md`/`docs/handoff.md` 以上游文档为基准，只追加自定义功能说明。
+
+**未实机验收**：合并后的代码尚未在真实 DSH 上运行过，需要完整退出重开 DSH 验收（CHAT/HARNESS 切换、官网列表、系统提示词注入、明暗跟随）。
+
 ## 0.1.23 已发布 npm（2026-10-17）
 
 用户明确授权并完成 npm 登录及当次 2FA，CHAT 正文和输入框字号跟随 HARNESS 的版本已发布。公开 latest=0.1.23，下载包 SHA256=4b2feb016cbf89a97d0c4a5a8ae1fca96cccf2a5d8a4f5ce6d17fca15fcbf9be，与本地发布包完全一致；公开 Client 的内容字号 token、正文样式及 composer textarea/mirror 同步已核实。此前官网CSS+虚构浏览器检查及本机安装通过。未 Git 提交/推送。

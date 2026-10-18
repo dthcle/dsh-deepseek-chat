@@ -15,6 +15,7 @@ import type { DshChatUIBridge, DshChatViewState, DshChatViewportRect } from './u
 import { DshChatWebSurface } from './web-surface.js'
 import { emptyNavigation, parseWebsiteNavigation, type WebsiteCommand } from './website-navigation.js'
 import { createSidebarBinding } from './sidebar-adapter.js'
+import { normalizeSystemPrompt } from './website-prompt.js'
 
 export const name = 'dsh-deepseek-chat'
 export const inject = ['slots', 'layout', 'remote']
@@ -49,8 +50,8 @@ export function apply(ctx: Context): void {
   let settingsOpen = false
   let settingsReadRequested=false
   let preferenceError: string | null = null
-  let preferences: {language:string} | null = null
-  let preferenceForm: import('@deepseek-ai/dsh-client-ui-settings/client').ConfigForm<{language:string}> | null = null
+  let preferences: {language:string; systemPrompt:string} | null = null
+  let preferenceForm: import('@deepseek-ai/dsh-client-ui-settings/client').ConfigForm<{language:string; systemPrompt:string}> | null = null
   let preferencesGeneration = -1
   let restoringPreferences = false
   let restorationSeen = false
@@ -85,6 +86,13 @@ export function apply(ctx: Context): void {
   const mode = new ModeController({
     readPanel: () => ctx.layout.panelInfo.getSnapshot().activePanelId,
     selectPanel: panel => { ctx.layout.selectPanel(panel as MainPanelId | null) },
+    ensureChatPanel: () => {
+      if (ctx.slots.entries('main').some(entry => entry.options.key === CHAT_PANEL)) return true
+      // The keyed main slot can lose our entry when the layout re-declares it.
+      // Re-register once instead of letting selectPanel throw and bounce.
+      try { ctx.slots.register({ name: 'main', key: CHAT_PANEL, inject: () => ({ bridge }) }, DshChatChatPanel) } catch { /* Already taken or undeclared. */ }
+      return ctx.slots.entries('main').some(entry => entry.options.key === CHAT_PANEL)
+    },
     mountChatNavigation: () => {
       const navigation = ctx.slots.inject('sidebar.workspaces', () => ctx.slots.register({ name: 'sidebar.workspaces', priority: -100, inject: () => ({ bridge }) }, DshChatChatNavigation))
       const leading = ctx.slots.inject('shell.leading', () => ctx.slots.register({name:'shell.leading',priority:-100,inject:()=>({bridge})}, DshChatLeadingControls))
@@ -108,6 +116,7 @@ export function apply(ctx: Context): void {
         ? '当前 DSH 未提供可信配置上下文，网页登录可用，但不能保存登录记忆。'
         : state.authorization.error ? 'CHAT 登录保存服务暂时不可用，请重试连接。' : null),
       desktopAvailable: Boolean(nativeBrowser), webLoading, webError, settingsOpen, preferenceError, viewport, brandAnchor, sidebarAdapted,
+      systemPrompt: preferences?.systemPrompt ?? '', modeTrace: mode.trace(),
       websiteSessionStatus, websiteSessionError, websiteAuthenticationStatus, websiteAuthenticationRevision,
       accountStorageKey: state.authorization.status === 'authorized' && state.authorization.accountId
         ? `dsh-deepseek-chat:website:${state.authorization.accountId}` : null,
@@ -299,6 +308,7 @@ export function apply(ctx: Context): void {
     selectMode: selected => { mode.select(selected) },
     refreshAuthorization: () => { void refreshAuthorization() },
     manageAccount: () => { bridge.beginWebsiteSignIn() },
+    setSystemPrompt: value => { persistPreference('systemPrompt', normalizeSystemPrompt(value)) },
     beginWebsiteSignIn: () => {
       if (disposed || !nativeBrowser || logoutRequested) return
       resetNavigationRefresh()
@@ -551,6 +561,10 @@ export function apply(ctx: Context): void {
     publish()
   }
   function readSettingsWhenReady(): void {
+    // Without the verified account trigger the guest reports no settings face at
+    // all; never start a request that could not be answered or retried.
+    // Opening CHAT settings is what starts a settings session, so this no longer
+    // waits for the guest to report a settings face by itself.
     if(!settingsOpen || !navigationHandler || websiteNavigation.status!=='ready' || websiteNavigation.authenticated!==true || settingsReadRequested || restoringPreferences || logoutRequested || logoutFailed || websiteNavigation.settings?.pending) return
     settingsReadRequested=true
     // Preference restoration already reads the public language value; reuse it.
@@ -558,19 +572,19 @@ export function apply(ctx: Context): void {
     void navigationHandler({type:'settings-read'})
   }
   function restorePreferences(): void {
-    if (!preferences || !navigationHandler || websiteNavigation.status!=='ready' || websiteNavigation.authenticated!==true || preferencesGeneration===authorizationGeneration || logoutRequested || logoutFailed || websiteNavigation.settings?.pending) return
+    if (!preferences || !navigationHandler || websiteNavigation.settings===undefined || websiteNavigation.status!=='ready' || websiteNavigation.authenticated!==true || preferencesGeneration===authorizationGeneration || logoutRequested || logoutFailed || websiteNavigation.settings?.pending) return
     const language = preferences.language || DEFAULT_WEBSITE_LANGUAGE
     preferencesGeneration=authorizationGeneration;restoringPreferences=true;restorationSeen=false
     void navigationHandler({type:'preferences',language})
   }
-  function persistPreference(key:'language', value:string): void {
+  function persistPreference(key:'language'|'systemPrompt', value:string): void {
     if (!preferenceForm || !preferences || preferences[key]===value || pendingPreferences.get(key)===value) return
     pendingPreferences.set(key,value)
     void preferenceForm.set(key,value).then(accepted=>{if(!accepted) throw new Error('refused');preferenceError=null},()=>{preferenceError='CHAT偏好未能保存，请检查DSH设置连接。'}).catch(()=>{preferenceError='CHAT偏好未能保存，请检查DSH设置连接。'}).finally(()=>{if(pendingPreferences.get(key)===value) pendingPreferences.delete(key);publish()})
   }
   ctx.inject(['configForms'], child => {
     child.effect(() => {
-      const form=child.configForms.get<{language:string}>(HOST_ENTRY_ID)
+      const form=child.configForms.get<{language:string; systemPrompt:string}>(HOST_ENTRY_ID)
       preferenceForm=form
       const read=()=>{
         const snapshot=form.getSnapshot()

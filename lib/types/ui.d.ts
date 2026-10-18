@@ -1,5 +1,6 @@
 import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots';
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
+import type { ModeTraceEntry } from './core/mode.js';
 import type { WebsiteCommand, WebsiteNavigation } from './website-navigation.js';
 import type { WebsiteSession } from './protocol.js';
 export type DshChatMode = 'chat' | 'harness';
@@ -36,6 +37,8 @@ export interface DshChatViewState {
     readonly websiteNavigationRefreshing: boolean;
     readonly websiteNavigationRefreshError: string | null;
     readonly showWebsiteNavigation: boolean;
+    readonly systemPrompt: string;
+    readonly modeTrace: readonly ModeTraceEntry[];
 }
 export interface DshChatUIBridge {
     getSnapshot(): DshChatViewState;
@@ -43,6 +46,7 @@ export interface DshChatUIBridge {
     selectMode(mode: DshChatMode): void;
     refreshAuthorization(): void;
     manageAccount(): void;
+    setSystemPrompt(value: string): void;
     beginWebsiteSignIn(): void;
     toggleSidebar(): void;
     attachViewport(element: HTMLElement | null): void;

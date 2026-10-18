@@ -26,7 +26,7 @@ const entryId = identity.match(/HOST_ENTRY_ID = '([^']+)'/)?.[1]
 assert(entryId, 'Missing Host settings entry ID')
 assert.equal(patch.match(/^[ \t]*- id: (\S+)/m)?.[1], entryId, 'Cordis entry and settings namespace differ')
 const client = await readFile(path.join(root, 'src/client.ts'), 'utf8')
-assert(client.includes('configForms.get<{language:string}>(HOST_ENTRY_ID)'), 'Preferences must use the shared Host entry ID')
+assert(/configForms\.get<\{[^}]*\}>\(HOST_ENTRY_ID\)/.test(client), 'Preferences must use the shared Host entry ID')
 await checkArtifact(root)
 const release = await verifyDistributionManifest(root)
 console.log(`Prebuilt distribution passed: ${release.name}@${release.version}; ${Object.keys(release.artifacts).length} compiled files match source inputs.`)

@@ -10,7 +10,7 @@
 
 **CHAT** embeds the real [DeepSeek Chat website](https://chat.deepseek.com/), including its chat interface and account history. **HARNESS** returns you to the original DSH workspace.
 
-Current version: **0.2.4** · Built for **DSH Desktop** · Simplified Chinese is the default language; English and Follow system are also available.
+Current version: **0.2.5** · Built for **DSH Desktop** · Simplified Chinese is the default language; English and Follow system are also available.
 
 ## Preview
 
@@ -44,6 +44,7 @@ Open the native DSH **Settings → CHAT Settings** page to check website account
 - Settings and the conversation page share the same website session. Account status and the conversation list update after sign-in, while the plugin saves the sign-in grant in the background.
 - After signing in normally inside the plugin, **Website sign-in remembered** indicates that the grant has been saved. UI wording follows the selected language.
 - Reopening the same DSH profile restores the grant for the website to validate. An expired grant requires a new sign-in.
+- **Custom system prompt:** the official page has no system-prompt field, so CHAT Settings offers an editable block of text. When enabled it is prepended to the beginning of every message you send and the official page sends it along with your message. Leave it empty to disable.
 
 ## Installation
 
@@ -52,13 +53,13 @@ Open the native DSH **Settings → CHAT Settings** page to check website account
 Enter the package name and version below in the DSH plugin installer to install the current latest release:
 
 ```text
-dsh-deepseek-chat@0.2.4
+dsh-deepseek-chat@0.2.5
 ```
 
 Or use the CLI:
 
 ```bash
-dsh plugin --profile desktop add dsh-deepseek-chat@0.2.4
+dsh plugin --profile desktop add dsh-deepseek-chat@0.2.5
 ```
 
 Use the same method for a first installation or an existing plugin. If DSH’s release age policy temporarily blocks a new version, retry later or use the GitHub option below.
@@ -84,12 +85,12 @@ This installs the version already pushed to the repository, which includes prebu
 Install a `.tgz` package using the DSH plugin manager, or run:
 
 ```bash
-dsh plugin --profile desktop add /absolute/path/dsh-deepseek-chat-0.2.4.tgz
+dsh plugin --profile desktop add /absolute/path/dsh-deepseek-chat-0.2.5.tgz
 ```
 
 Replace the path with your actual package location.
 
-**Fully quit and reopen DSH after installation, then confirm that the plugin manager shows version 0.2.4.** Replace `desktop` with the appropriate name if you use another profile.
+**Fully quit and reopen DSH after installation, then confirm that the plugin manager shows version 0.2.5.** Replace `desktop` with the appropriate name if you use another profile.
 
 See the [official DSH plugin installation documentation](https://deepseek-harness.github.io/deepseek-harness/en/develop/basic/publish) for more information.
 
@@ -118,6 +119,8 @@ Refreshing the list reloads the current website page and retains the conversatio
 
 DeepSeek’s website handles chats and account history. To adapt the interface, the plugin reads visible navigation titles, groups, links, account display names and language settings. Navigation metadata remains in memory during the current authorized lifetime. Language preferences are saved through the official DSH configuration service.
 
+The custom system prompt in CHAT Settings is stored in your DSH configuration; the plugin never logs it or keeps another copy. When enabled it is sent to the website as part of your message, so the official page itself sees that text.
+
 Remembered website sign-in processes only the minimum grant data from the plugin’s own `chat.deepseek.com` page and stores it through the official DSH credentials service. The plugin derives a separate record identifier from the profile path supplied by the DSH launcher, keeping profiles separate and associating the grant with its website account. Signing out clears the previous grant and fences off late save operations. Without trusted profile context, normal website sign-in still works, but it cannot be remembered. This depends on the website’s current implementation, is not a stable official OAuth interface and does not promise permanent sign-in.
 
 The plugin does not store passwords, cookies or message bodies, read tokens belonging to DSH or other plugins, access other browsers’ sign-in data, call private authentication APIs, modify the DSH application package or disable web security. See the [architecture notes](docs/architecture.md) and [website session notes](docs/browser-session-capability.md) for the data flow and authorization boundaries; these technical notes are in Chinese.
@@ -133,7 +136,7 @@ pnpm install --frozen-lockfile
 pnpm package:plugin
 ```
 
-This produces `artifacts/dsh-deepseek-chat-0.2.4.tgz`, containing Host and Client code, declarations, the icon, locale metadata and the bundle patch. The plugin-manager icon is `assets/icon.svg`; replace it and rebuild to change the icon. The SVG must be self-contained and no larger than 256 KiB.
+This produces `artifacts/dsh-deepseek-chat-0.2.5.tgz`, containing Host and Client code, declarations, the icon, locale metadata and the bundle patch. The plugin-manager icon is `assets/icon.svg`; replace it and rebuild to change the icon. The SVG must be self-contained and no larger than 256 KiB.
 
 After source changes, run `pnpm release:prepare` and commit the source together with the complete `lib/` directory. `pnpm check:distribution` checks the compiled files against the source, version and installation entry. Stale or missing output fails the check. People installing the plugin do not need these development commands.
 

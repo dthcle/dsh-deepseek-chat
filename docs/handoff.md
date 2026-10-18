@@ -1,3 +1,30 @@
+## 0.2.5 把本地自定义功能合并到上游 0.2.4（2026-10-18，已构建，待实机验收）
+
+**目标**：让改动可追溯、可重放，不再只存在于本机工作区（此前一旦重装即丢失）；仓库 base 为上游，`main` = 上游 + 自定义功能，由我们维护，后续可继续同步上游。
+
+**过程**：
+1. 先把 0.1.23–0.1.29 的未提交工作存成提交 `f15588e`（分支 `local/0.1.29`，标签 `backup/local-0.1.29`）作为安全网。
+2. `gh repo fork xingxingbk-git/dsh-deepseek-chat` → `dthcle/dsh-deepseek-chat`。
+3. 远端改为标准 fork 布局：`origin` = 我们的 fork，`upstream` = 原作者仓库。
+4. `main` 快进到上游 69794fc（0.2.4），把 `local/0.1.29` rebase 到其上。
+5. 逐个解决冲突，最后重建 `lib`，版本 0.2.4 → 0.2.5。
+
+**冲突文件与解决方式**（8 个）：
+| 文件 | 冲突 | 解决 |
+|---|---|---|
+| `package.json` | 版本 / peers / devDeps | 整体采用上游（上游已加 `engines.dsh` 枚举），只把版本改为 0.2.5 |
+| `src/website-settings.ts` | `request()` 体 + 自动链条件 | 保留上游「跟随宿主主题」的 `desiredTheme`/`complete` 逻辑，叠加我们的 `sessionMarker` 门控与 `MAX_SETTINGS_ATTEMPTS` 上限 |
+| `src/website-navigation.ts` | 首帧准备条件 + `ready` 判定 | 保留上游的主题完成度条件，叠加我们的时间戳与 `FIRST_PAINT_GRACE_MS` 上界 |
+| `lib/build-manifest.json`、`lib/client.js` | 生成物 | 先取上游，合并完源码后整体重建 |
+| `README.md`、`README.en.md` | 版本号、功能列表 | 以上游为基准，追加系统提示词功能说明与隐私说明 |
+| `AGENTS.md`、`docs/handoff.md` | 顶部条目 | 以上游为基准，追加本条目 |
+
+**自动合并未冲突但需留意**：`src/ui.tsx`（上游的 `stopPropagation` 与我们的诊断面板共存）、`src/web-surface.tsx`（上游的宿主主题/字号同步 + 我们的提示词注入与 `documents` 诊断）、`src/client.ts`、`src/core/mode.ts`、`scripts/*`。
+
+**验证**：见本条目之后的实测记录（构建 / 分发检查 / 单元测试 / 安装 / CLI 兼容性）。
+
+**未实机验收**：合并结果没有在真实 DSH 上跑过。需要完整退出重开 DSH，确认：CHAT/HARNESS 切换正常、官网对话列表可用、CHAT设置里的系统提示词能保存并生效、明暗跟随 HARNESS 生效、上一轮的「页面一直被刷新」不再出现。
+
 ## README 移除已解决的分享复制说明（2026-10-18）
 
 用户确认复制已修复，要求删除 README 末尾手动复制说明；已同步删除中英文对应整个段落，仅文档修改，不递增版本、不重新构建或发布 npm。

@@ -13,3 +13,5 @@ output/playwright/
 *.log
 .codex/
 .aws/
+.test-build-*/
+package-lock.json

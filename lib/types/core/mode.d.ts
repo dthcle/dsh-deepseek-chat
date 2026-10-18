@@ -15,10 +15,18 @@ export interface ModeState {
 export interface NavigationPort {
     readPanel(): string | null;
     selectPanel(panel: string | null): void;
+    /** Optional: confirm (and if needed re-register) the CHAT main panel key. */
+    ensureChatPanel?(): boolean;
     mountChatNavigation(): () => void;
     cancelAccount(accountId: string): void;
 }
 export declare const CHAT_PANEL = "dsh-deepseek-chat.chat";
+/** A short, credential-free timeline of mode transitions for the CHAT settings page. */
+export interface ModeTraceEntry {
+    readonly at: number;
+    readonly event: string;
+    readonly detail: string;
+}
 /** Every entry checks desktop compatibility; website sign-in happens inside CHAT. */
 export declare class ModeController {
     private readonly port;
@@ -29,9 +37,13 @@ export declare class ModeController {
     private transitioning;
     private disposed;
     private lastPanel;
+    private readonly traceLog;
     constructor(port: NavigationPort, compatibilityEnabled: boolean);
     getSnapshot: () => ModeState;
     subscribe: (listener: () => void) => (() => void);
+    /** Newest last; bounded so the settings page never grows with a session. */
+    trace: () => readonly ModeTraceEntry[];
+    private note;
     canEnter(): boolean;
     updateAuthorization(authorization: ModeAuthorization): void;
     select(mode: Mode): boolean;

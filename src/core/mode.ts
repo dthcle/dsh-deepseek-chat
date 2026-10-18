@@ -18,11 +18,24 @@ export interface ModeState {
 export interface NavigationPort {
   readPanel(): string | null
   selectPanel(panel: string | null): void
+  /** Optional: confirm (and if needed re-register) the CHAT main panel key. */
+  ensureChatPanel?(): boolean
   mountChatNavigation(): () => void
   cancelAccount(accountId: string): void
 }
 
 export const CHAT_PANEL = 'dsh-deepseek-chat.chat'
+
+/** A short, credential-free timeline of mode transitions for the CHAT settings page. */
+export interface ModeTraceEntry {
+  readonly at: number
+  readonly event: string
+  readonly detail: string
+}
+
+const TRACE_LIMIT = 24
+
+const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
 /** Every entry checks desktop compatibility; website sign-in happens inside CHAT. */
 export class ModeController {
@@ -33,6 +46,7 @@ export class ModeController {
   private transitioning = false
   private disposed = false
   private lastPanel: string | null
+  private readonly traceLog: ModeTraceEntry[] = []
 
   constructor(private readonly port: NavigationPort, compatibilityEnabled: boolean) {
     this.lastPanel = port.readPanel()
@@ -46,6 +60,12 @@ export class ModeController {
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
+  }
+  /** Newest last; bounded so the settings page never grows with a session. */
+  trace = (): readonly ModeTraceEntry[] => this.traceLog
+  private note(event: string, detail = ''): void {
+    this.traceLog.push({ at: Date.now(), event, detail: detail.slice(0, 200) })
+    if (this.traceLog.length > TRACE_LIMIT) this.traceLog.splice(0, this.traceLog.length - TRACE_LIMIT)
   }
 
   canEnter(): boolean {
@@ -71,7 +91,10 @@ export class ModeController {
       this.leave(true)
       return true
     }
-    if (!this.canEnter()) return false
+    if (!this.canEnter()) {
+      this.note('select.blocked', 'desktop browser capability unavailable')
+      return false
+    }
     if (this.state.mode === 'chat') return true
     return this.enter(this.port.readPanel())
   }
@@ -80,12 +103,21 @@ export class ModeController {
     this.originalPanel = originalPanel === CHAT_PANEL ? null : originalPanel
     this.transitioning = true
     try {
+      const registered = this.port.ensureChatPanel?.()
+      this.note('enter.precheck', registered === undefined ? 'unavailable' : registered ? 'panel registered' : 'panel missing')
       this.unmountChat = this.port.mountChatNavigation()
       this.state = { ...this.state, mode: 'chat', error: null }
       this.port.selectPanel(CHAT_PANEL)
+      if (this.port.readPanel() !== CHAT_PANEL) {
+        // The layout may reject or immediately reset an id it does not know.
+        this.note('enter.reselect', 'layout did not keep ' + CHAT_PANEL)
+        this.port.selectPanel(CHAT_PANEL)
+      }
+      this.note('enter.select', 'active=' + String(this.port.readPanel()))
       this.publish()
       return true
     } catch (error) {
+      this.note('enter.fail', reason(error))
       this.cleanupNavigation()
       this.state = { ...this.state, mode: 'harness', error: 'CHAT 界面加载失败，已恢复 Harness。' }
       try { this.port.selectPanel(this.originalPanel) } catch { /* Original panel may have unloaded. */ }
@@ -102,12 +134,16 @@ export class ModeController {
     this.lastPanel = panel
     if (this.disposed || this.transitioning) return
     if (panel === CHAT_PANEL && this.state.mode !== 'chat') {
+      this.note('observe.adopt', 'previous=' + String(previous))
       // Selecting the registered main key directly keeps the same compatibility check.
       if (!this.canEnter() || !this.enter(previous)) {
         this.transitioning = true
         try { this.port.selectPanel(previous === CHAT_PANEL ? null : previous) } finally { this.transitioning = false }
       }
     } else if (panel !== CHAT_PANEL && this.state.mode === 'chat') {
+      // DSH navigation stays authoritative: any other panel (including null) is
+      // the user's own destination, so follow it back to Harness.
+      this.note('observe.leave', 'panel=' + String(panel))
       this.leave(false)
     }
   }
