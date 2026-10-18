@@ -28,6 +28,12 @@
 - 相对上游的净差异：`git diff --stat 69794fc HEAD` = 27 文件、+1184/−253；其中 `package.json` 只差 1 行（版本号）。
 - 已推送：`origin/main` = 018008f；标签 `backup/local-0.1.29` = f15588e（重放前的原始工作，可用于对照）。
 
+**安装来源改为 GitHub（不再依赖本机目录）**：
+- 本机 desktop profile 的依赖由 `file:F:/code/tmp/dsh-deepseek-chat/artifacts/*.tgz` 改为 `github:dthcle/dsh-deepseek-chat`。这正是「重装即失效」的根因——此前插件只存在于本机目录。
+- pnpm-lock 把该依赖锁定到精确提交 `8a9ec1bbe73fabaa24c5d3a466120e66bf445815`，即推送后的 main；`plugin list` 显示 `dsh-deepseek-chat@0.2.5` 且无任何 incompatibility 告警。
+- 命令：`dsh plugin --profile desktop add github:dthcle/dsh-deepseek-chat`
+- 注意：在本机用脚本拉起 CLI 时必须显式提供 `PATH`（含 `C:\Program Files\Git\cmd`，pnpm 解析 github: 规格需要 git）与代理变量（`HTTP_PROXY/HTTPS_PROXY/ALL_PROXY=http://127.0.0.1:11811`、`NODE_USE_ENV_PROXY=1`），否则分别报 `'git' 不是内部或外部命令` 与 `ETIMEDOUT`。在 DSH 插件管理界面里直接输入规格则由应用自身环境处理，无此问题。
+
 **未实机验收**：合并结果没有在真实 DSH 上跑过。需要完整退出重开 DSH，确认：CHAT/HARNESS 切换正常、官网对话列表可用、CHAT设置里的系统提示词能保存并生效、明暗跟随 HARNESS 生效、上一轮的「页面一直被刷新」不再出现。
 
 ## README 移除已解决的分享复制说明（2026-10-18）
