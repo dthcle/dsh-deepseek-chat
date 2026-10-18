@@ -21,7 +21,12 @@
 
 **自动合并未冲突但需留意**：`src/ui.tsx`（上游的 `stopPropagation` 与我们的诊断面板共存）、`src/web-surface.tsx`（上游的宿主主题/字号同步 + 我们的提示词注入与 `documents` 诊断）、`src/client.ts`、`src/core/mode.ts`、`scripts/*`。
 
-**验证**：见本条目之后的实测记录（构建 / 分发检查 / 单元测试 / 安装 / CLI 兼容性）。
+**验证（合并后实测）**：
+- `node scripts/build.mjs` 通过（内部先跑 tsc，即类型检查 0 错误）。
+- `node scripts/check-distribution.mjs`：`Prebuilt distribution passed: dsh-deepseek-chat@0.2.5；24 compiled files match source inputs`（24 而非 22，因为上游新增了 website-share-copy / website-typography）。
+- `node scripts/test.mjs`：40 tests / **6 pass / 27 fail**，与 0.1.29 时的既有基线逐项相同（authorization 0/2、client 0/20、mode 4/2、server 0/1、website-navigation 2/2），**无新增失败**。这套失败是 Windows 上的历史遗留，不是本次合并引入。
+- 相对上游的净差异：`git diff --stat 69794fc HEAD` = 27 文件、+1184/−253；其中 `package.json` 只差 1 行（版本号）。
+- 已推送：`origin/main` = 018008f；标签 `backup/local-0.1.29` = f15588e（重放前的原始工作，可用于对照）。
 
 **未实机验收**：合并结果没有在真实 DSH 上跑过。需要完整退出重开 DSH，确认：CHAT/HARNESS 切换正常、官网对话列表可用、CHAT设置里的系统提示词能保存并生效、明暗跟随 HARNESS 生效、上一轮的「页面一直被刷新」不再出现。
 
