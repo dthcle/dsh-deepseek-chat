@@ -62,8 +62,6 @@ export interface WebsiteDiagnostic {
   readonly failure: string | null
 }
 
-/** Identification may hold the first paint only this long; the page must never stay blank. */
-const FIRST_PAINT_GRACE_MS = 6_000
 export type WebsiteCommand = { readonly type: 'snapshot'; readonly showOriginal: boolean; readonly headerInset?: number }
   | { readonly type: 'open'; readonly href: string }
   | { readonly type: 'conversation-action'; readonly href: string; readonly action: 'rename' | 'pin' | 'unpin' | 'share' | 'delete'; readonly title?: string }
@@ -93,6 +91,10 @@ export const hostDiagnostic = (documents: number, failure: string | null = null)
 
 /** This function is serialized into our isolated guest. Keep all helpers inside it. */
 export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'origin' | 'pathname'>, command: WebsiteCommand): WebsiteNavigation {
+  // Declared here on purpose: this function is serialized into the website guest
+  // with Function.prototype.toString. A module-level reference would be undefined
+  // inside the guest and abort the entire injected command.
+  const FIRST_PAINT_GRACE_MS = 6_000
   const origin = 'https://chat.deepseek.com'
   const marker = 'data-dsh-chat-navigation'
   const presentedMarker = 'data-dsh-chat-presented'

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { build } from 'esbuild'
 import { checkArtifact } from './check-artifact.mjs'
+import { checkGuestScript } from './check-guest-script.mjs'
 import { baselineModules, clientRequests, inlineSafeModule } from './client-contract.mjs'
 import { writeDistributionManifest } from './distribution-manifest.mjs'
 
@@ -115,5 +116,6 @@ const browserArtifact = `window.__ModuleLoader__.load({\n` +
 await mkdir(outputDirectory, { recursive: true })
 await writeFile(path.join(outputDirectory, 'client.js'), browserArtifact, 'utf8')
 await checkArtifact(projectRoot, { requests: externalRequests })
+await checkGuestScript(projectRoot)
 await writeDistributionManifest(projectRoot)
 console.log(`Built ${manifest.name}: Host ESM, declarations, and lazy-CJS Client (${externalRequests.join(', ') || 'no runtime module requests'}).`)

@@ -1,10 +1,11 @@
 import type { WebsiteCommand } from './website-navigation.js'
 
-/** One document may begin only this many settings runs before it stops trying. */
-const MAX_SETTINGS_ATTEMPTS = 6
-
 /** Public account menu and General controls only; no site APIs or storage. */
 export function adaptWebsiteSettings(doc: Document, trigger: HTMLElement | null, command: WebsiteCommand) {
+  // Declared here on purpose: this function is serialized into the website guest
+  // with Function.prototype.toString, so any module-level reference would be an
+  // undefined identifier there and abort the whole injected command.
+  const MAX_SETTINGS_ATTEMPTS = 6
   const root = doc.documentElement
   const attr = (name: string) => `data-dsh-chat-settings-${name}`
   const desiredTheme = root.getAttribute('data-dsh-chat-host-theme') === 'light' ? 'light' : 'dark'
