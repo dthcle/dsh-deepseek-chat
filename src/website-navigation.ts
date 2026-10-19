@@ -55,6 +55,11 @@ export interface WebsiteDiagnostic {
   readonly fallbacks: number
   /** Main-frame documents this guest has presented; a climbing number means reloads. */
   readonly documents: number
+  /**
+   * Why the last projection produced nothing usable. Bounded, structural only:
+   * an error class plus the failing stage, never page text or account values.
+   */
+  readonly failure: string | null
 }
 
 /** Identification may hold the first paint only this long; the page must never stay blank. */
@@ -76,13 +81,14 @@ export const emptyNavigation = (): WebsiteNavigation => ({ status: 'loading', au
  * its adapter fails. CHAT settings must always have something to show: the older
  * "no diagnostic yet" placeholder hid exactly the reload loops it had to reveal.
  */
-export const hostDiagnostic = (documents: number): WebsiteDiagnostic => ({
+export const hostDiagnostic = (documents: number, failure: string | null = null): WebsiteDiagnostic => ({
   status: 'loading', authenticated: undefined, profile: false, sidebar: false, newChat: false, conversations: 0,
   appearanceRequest: null, appearancePhase: null, appearanceRemainingMs: 0,
   appearanceDark: false, appearanceError: false, appearanceRestored: false,
   proof: 'none', trackImages: 0, fallback: false, missingSidebarMs: 0, authenticatedMs: 0,
   polls: 0, boundaryFailures: 0, identifiedPolls: 0, anonymousPolls: 0, appearanceBlocks: 0, fallbacks: 0,
   documents: Number.isFinite(documents) && documents > 0 ? Math.round(documents) : 0,
+  failure,
 })
 
 /** This function is serialized into our isolated guest. Keep all helpers inside it. */
@@ -170,7 +176,7 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
       authenticatedMs: Number.isFinite(authSince) && authSince > 0 ? Date.now() - authSince : 0,
       polls: diagCount('polls'), boundaryFailures: diagCount('boundary'), identifiedPolls: diagCount('identified'),
       anonymousPolls: diagCount('anonymous'), appearanceBlocks: diagCount('appearance'), fallbacks: diagCount('fallback'),
-      documents: 0,
+      documents: 0, failure: null,
     }
   }
   if (page.origin !== origin) return fallback()
@@ -646,6 +652,8 @@ export function parseWebsiteNavigation(value: unknown): WebsiteNavigation {
       polls: span(raw.polls), boundaryFailures: span(raw.boundaryFailures), identifiedPolls: span(raw.identifiedPolls),
       anonymousPolls: span(raw.anonymousPolls), appearanceBlocks: span(raw.appearanceBlocks), fallbacks: span(raw.fallbacks),
       documents: span(raw.documents),
+      // Structural reason only: strip anything that could carry page text.
+      failure: typeof raw.failure === 'string' && raw.failure.length > 0 ? raw.failure.slice(0, 160) : null,
     }
     : undefined
   return { status: source.status, ...(authenticated === undefined ? {} : { authenticated }), conversations: authenticated === true ? conversations : [], selectedHref: validHref(source.selectedHref) ? source.selectedHref : null, ...(diagnostic === undefined ? {} : { diagnostic }),

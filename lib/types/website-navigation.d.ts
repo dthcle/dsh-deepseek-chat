@@ -53,6 +53,11 @@ export interface WebsiteDiagnostic {
     readonly fallbacks: number;
     /** Main-frame documents this guest has presented; a climbing number means reloads. */
     readonly documents: number;
+    /**
+     * Why the last projection produced nothing usable. Bounded, structural only:
+     * an error class plus the failing stage, never page text or account values.
+     */
+    readonly failure: string | null;
 }
 export type WebsiteCommand = {
     readonly type: 'snapshot';
@@ -98,7 +103,7 @@ export declare const emptyNavigation: () => WebsiteNavigation;
  * its adapter fails. CHAT settings must always have something to show: the older
  * "no diagnostic yet" placeholder hid exactly the reload loops it had to reveal.
  */
-export declare const hostDiagnostic: (documents: number) => WebsiteDiagnostic;
+export declare const hostDiagnostic: (documents: number, failure?: string | null) => WebsiteDiagnostic;
 /** This function is serialized into our isolated guest. Keep all helpers inside it. */
 export declare function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'origin' | 'pathname'>, command: WebsiteCommand): WebsiteNavigation;
 export declare function websiteCommandScript(command: WebsiteCommand, contentFontSize?: number, colorScheme?: 'light' | 'dark'): string;

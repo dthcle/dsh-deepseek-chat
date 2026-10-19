@@ -320,7 +320,7 @@ export function DshChatChatNavigation({ bridge, wide, expandSidebar }: PropsRunt
           </section>)}
           {groups.size === 0 && <p className="dsh-chat-navigation-status">{query ? '没有匹配的对话' : '暂无对话'}</p>}
           {!query && navigation.conversations.length > 0 && <button type="button" className="dsh-chat-text-button" onClick={() => bridge.commandWebsite({type:'more'})}>加载更早的对话</button>}
-        </> : <p className="dsh-chat-navigation-status" role="status">{navigation.status === 'sign-in' ? 'CHAT 尚未登录。请在右侧点击登录 DeepSeek，完成后自动显示官网对话。' : navigation.status === 'unsupported' ? '暂未识别官网列表，请使用右侧官网导航。' : '正在加载官网对话…'}</p>}
+        </> : <p className="dsh-chat-navigation-status" role="status">{navigation.status === 'sign-in' ? 'CHAT 尚未登录。请在右侧点击登录 DeepSeek，完成后自动显示官网对话。' : navigation.status === 'unsupported' ? '暂未识别官网列表，正在自动重试。' : '正在加载官网对话…'}{navigation.diagnostic?.failure ? `（${navigation.diagnostic.failure}）` : ''}</p>}
         {navigation.error && <p className="dsh-chat-navigation-status" role="alert">{navigation.error}</p>}
         {state.websiteNavigationRefreshError && <p className="dsh-chat-navigation-status" role="alert">{state.websiteNavigationRefreshError}</p>}
         {state.websiteNavigationRefreshError==='官网对话列表同步超时，请点击「重新加载」。' && <button type="button" className="dsh-chat-text-button" onClick={()=>bridge.reloadWebsite()} disabled={!state.modeEnabled || !state.desktopAvailable || ['signing-in','signing-out'].includes(state.websiteAuthenticationStatus)}>重新加载</button>}
@@ -405,6 +405,7 @@ function DshChatModeDiagnostics({ state }: { readonly state: DshChatViewState })
       `  fallback=${diagnostic.fallback} 未识别侧栏=${diagnostic.missingSidebarMs}ms 已认证=${diagnostic.authenticatedMs}ms`,
       `  本页累计 采样=${diagnostic.polls} 边界失败=${diagnostic.boundaryFailures} 识别到账号=${diagnostic.identifiedPolls} 未识别账号=${diagnostic.anonymousPolls} 设置同步中=${diagnostic.appearanceBlocks} 回退=${diagnostic.fallbacks}`,
       `  页面加载次数=${diagnostic.documents}（持续增长即官网被反复重载）`,
+      `  最近一次失败=${diagnostic.failure ?? '无'}`,
     ].join('\n')
   return <details className="dsh-chat-settings-diagnostics">
     <summary>诊断（模式切换 / 官网识别）</summary>

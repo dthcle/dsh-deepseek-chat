@@ -8,6 +8,12 @@ import { parseWebsiteSession, websiteSessionCaptureScript, websiteSessionRestore
 import { websitePromptScript } from './website-prompt.js'
 
 const WEBSITE_URL = 'https://chat.deepseek.com/'
+/**
+ * How many consecutive failed projections must pass before the host publishes a
+ * degraded frame. One transient failure is normal while the site commits a route;
+ * reporting it immediately is what made the adapter look permanently broken.
+ */
+const PERSISTENT_FAILURES = 3
 
 /** Runs entirely in our guest. Only an enum crosses back; no draft text is exported or stored. */
 function websiteRefreshReadiness(doc: Document, origin: string): 'ready' | 'draft' | 'busy' | 'unavailable' {
@@ -152,6 +158,8 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
     let fastPollingUntil = Date.now()+8000
     let lastPolled = 0
     let lastNavigationStatus: string | null = null
+    /** Consecutive failed projections in this document; reset by any success. */
+    let projectionFailures = 0
     const finishNavigationRefresh = (error: string | null, request=navigationRefresh) => {
       if (!request || navigationRefresh!==request) return
       navigationRefresh=null;clearTimeout(navigationRefreshTimer);navigationRefreshTimer=undefined
@@ -174,6 +182,19 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
     }
     let reading = false
     let queued = Promise.resolve()
+    /**
+     * One short, structural reason for a failed projection: the failing stage and
+     * the error class only. Never a stack, a URL query, page text or account data.
+     */
+    const describeProjectionFailure = (error: unknown): string => {
+      const name = typeof error === 'object' && error !== null && 'name' in error && typeof error.name === 'string' ? error.name : 'Error'
+      const message = error instanceof Error ? error.message : String(error ?? '')
+      if (/deadline exceeded/i.test(message)) return '命令超时（页面未响应注入）'
+      if (/destroyed|destroyed/i.test(message)) return '页面已销毁'
+      if (/not ready|not attached|attached/i.test(message)) return '页面尚未就绪'
+      if (/executeJavaScript/i.test(message)) return '注入命令不可用'
+      return (name + ': ' + message).replace(/\s+/g, ' ').slice(0, 150)
+    }
     const executeScript = async (script: string) => {
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
@@ -265,6 +286,7 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
         if(!approvedOrigin() || !await prepareSession() || !currentProjection()) return
         let result = parseWebsiteNavigation(await execute(command))
         if(!currentProjection()) return
+        projectionFailures = 0
         if (result.diagnostic !== undefined) result = {...result, diagnostic: {...result.diagnostic, documents: documentRevision}}
         // Keep this document's first usable presentation through transient DOM
         // loading. Only a real document replacement clears navigation and paint.
@@ -290,16 +312,25 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
           // saved authorization; a failed clear remains explicit and retryable.
           if(snapshot.websiteAuthenticationStatus!=='signing-out') void bridge.clearWebsiteSession(generation)
         }
-      } catch {
+      } catch (error) {
         if (currentProjection()) {
-          documentPresented=true
-          // A failed DOM projection cannot prove that the website signed out.
-          // Drop only unconfirmed navigation and keep the real website usable.
-          bridge.reportWebsiteNavigation(generation, { status: 'unsupported', conversations: [], selectedHref: null, canCreate: false, error: null, diagnostic: hostDiagnostic(documentRevision) })
-          setPresentationReady(!snapshot.settingsOpen)
-          if (currentProjection()) {
-            try { await execute({type:'restore'}) } catch { /* Polling probes the recovered page without restarting its first paint. */ }
+          // A failed projection cannot prove that the website signed out, and it
+          // must never take the page away from the user: the site's own layout is
+          // what they are left looking at otherwise. Keep the last confirmed
+          // navigation, record why the projection failed, and let the poller
+          // retry. Never send 'restore' from here.
+          projectionFailures++
+          const reason = describeProjectionFailure(error)
+          if (projectionFailures >= PERSISTENT_FAILURES) {
+            const previous = bridge.getSnapshot().websiteNavigation
+            bridge.reportWebsiteNavigation(generation, previous.authenticated === true
+              // Already confirmed: keep the list and account; only note the failure.
+              ? { ...previous, diagnostic: { ...(previous.diagnostic ?? hostDiagnostic(documentRevision)), failure: reason } }
+              : { status: 'unsupported', conversations: [], selectedHref: null, canCreate: false, error: null, diagnostic: hostDiagnostic(documentRevision, reason) })
           }
+          // Retry quickly at first, then back off so a broken page does not spin.
+          fastPollingUntil = Date.now() + 8_000
+          return
         }
       }
     }
