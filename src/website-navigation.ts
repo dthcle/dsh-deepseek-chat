@@ -603,8 +603,12 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
   // Only the account face can drive the theme sync, so the sync can only be
   // pending when a profile was identified. Waiting for it without one is a
   // deadlock: the state would stay 'loading' for as long as the page lives.
-  const themeExpected = identifiedProfile !== null
-  const ready = authenticated !== true || !themeExpected || themeSettled || Boolean(settings?.error)
+  // The theme sync only runs inside an explicit settings session (the account menu
+  // is never opened by a background poll). Waiting for its result outside one is
+  // a deadlock: 'theme-complete' would never be written, so the page would stay
+  // 'loading' with body opacity 0 for as long as it lives.
+  const themePending = identifiedProfile !== null && settingsSession
+  const ready = authenticated !== true || !themePending || themeSettled || Boolean(settings?.error)
     || preparingMs >= FIRST_PAINT_GRACE_MS || (command.type==='snapshot' && command.showOriginal)
   if (ready) {
     settingsRoot.removeAttribute(preparingMarker)
