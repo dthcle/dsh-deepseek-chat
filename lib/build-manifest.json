@@ -25,7 +25,7 @@
     "src/web-surface.tsx": "e96a7ba8d1a0caf577091d96aef1ba42b86bac911629e0e6d44f5b899405ba4b",
     "src/website-conversation-actions.ts": "59159b88b0a5cf0b9d453f7f24817c2ed7d316b0d425df62e767bbf2606ed1d2",
     "src/website-header.ts": "19b93f7bcb3f34b0cc5150d9a696516935651d0ba5f3b334d3bac1ed8fecf6aa",
-    "src/website-navigation.ts": "850b1df8d142836671d6ca4415a90e2185595e122d71ac51975994a70a4bc7ca",
+    "src/website-navigation.ts": "9e30cccfe619b6b215585ba5c9c70283393fc69afe54bc8df71122c96f40d4ae",
     "src/website-notice.ts": "9c56661c186cf0fb02166abe86010f3ac40f4ed8e2173c2d2d88ab89784fb387",
     "src/website-prompt.ts": "724e4cd1cb95d49ac9d484d0f38959c4d03624cdc0cb462fbb2d74a18ae2a64e",
     "src/website-session-store.ts": "23232d0671e50c14d36bd0b43bda6554c1a51ae7a5ca41dafe3559bf4a23e4f8",
@@ -37,7 +37,7 @@
     "tsconfig.json": "98981d686e1b1919e39a3c621b383f5365afd926b50f5582f8c937a858f82ff2"
   },
   "artifacts": {
-    "lib/client.js": "9903f72f273ed0b45c18ecda8da358451b00c810b299506839bf3e6aadbbf8a8",
+    "lib/client.js": "405a8e3f198598afd3d5ae160d38ec13b4742251f69a321fd7fd112e66450524",
     "lib/index.js": "135f4639a7c0fcbd5918acde83a1944c06165e4f1ef7d8968c76ffe36641b66a",
     "lib/types/authorization.d.ts": "130649eed3635e75c3f50c13de93c52440a27f1b88136ab2297552570c013d49",
     "lib/types/client.d.ts": "a79702d5d86c75e81f1e954b3e9f4a562a6b3082d68d798d6a1b37bd41b908a7",

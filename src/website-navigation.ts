@@ -217,8 +217,10 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
   if (/^\/sign_in\/?$/.test(page.pathname)) { restore(); return empty('sign-in') }
   // Gate only the document's first adapted paint. Later appearance checks must
   // leave the presented website and its environment/security notices visible.
-  if (!isOriginalSnapshot && !recovering && !doc.documentElement.hasAttribute(presentedMarker)
-    && doc.documentElement.getAttribute('data-dsh-chat-theme-complete') !== (doc.documentElement.getAttribute('data-dsh-chat-host-theme') === 'light' ? 'light' : 'dark')) {
+  // This gate runs before the profile is identified, so it cannot know whether the
+  // theme sync will ever start. It stays bounded by FIRST_PAINT_GRACE_MS in the
+  // ready gate below; the opacity must never outlive that bound.
+  if (!isOriginalSnapshot && !recovering && !doc.documentElement.hasAttribute(presentedMarker)) {
     if (!doc.documentElement.hasAttribute(preparingMarker)) doc.documentElement.setAttribute(preparingMarker, String(Date.now()))
     if (!doc.getElementById(preparingStyleId)) {
       const style=doc.createElement('style'); style.id=preparingStyleId
@@ -598,7 +600,12 @@ export function adaptWebsiteNavigation(doc: Document, page: Pick<Location, 'orig
   const preparingSince = Number(settingsRoot.getAttribute(preparingMarker))
   const preparingMs = Number.isFinite(preparingSince) && preparingSince > 0 ? Date.now() - preparingSince : 0
   const themeSettled = settingsRoot.getAttribute('data-dsh-chat-theme-complete') === (settingsRoot.getAttribute('data-dsh-chat-host-theme') === 'light' ? 'light' : 'dark')
-  const ready = authenticated !== true || themeSettled || Boolean(settings?.error) || preparingMs >= FIRST_PAINT_GRACE_MS || (command.type==='snapshot' && command.showOriginal)
+  // Only the account face can drive the theme sync, so the sync can only be
+  // pending when a profile was identified. Waiting for it without one is a
+  // deadlock: the state would stay 'loading' for as long as the page lives.
+  const themeExpected = identifiedProfile !== null
+  const ready = authenticated !== true || !themeExpected || themeSettled || Boolean(settings?.error)
+    || preparingMs >= FIRST_PAINT_GRACE_MS || (command.type==='snapshot' && command.showOriginal)
   if (ready) {
     settingsRoot.removeAttribute(preparingMarker)
     if (!(command.type === 'snapshot' && command.showOriginal)) settingsRoot.setAttribute(presentedMarker, '')
