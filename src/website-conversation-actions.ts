@@ -9,6 +9,48 @@ export async function performWebsiteConversationAction(doc: Document, command: E
   const profile = doc.querySelector('[data-dsh-chat-profile-confirmed="footer-v1"]')
   if (!sidebar || !profile || doc.defaultView?.location.origin !== 'https://chat.deepseek.com'
     || !/^https:\/\/chat\.deepseek\.com\/a\/chat\/s\/[a-zA-Z0-9-]+$/.test(command.href) || !labels[command.action]) return error
+  /**
+   * Finish the site's own two-step deletion. Declared here on purpose: this
+   * function is serialized into the guest with Function.prototype.toString, so a
+   * module-level helper would be undefined there and abort the whole command.
+   *
+   * The menu item only opens a confirmation dialog, and that dialog's confirm
+   * button repeats the same label, so it is found by its dialog container rather
+   * than by text alone. Success is reported only once the site's own list no
+   * longer contains the conversation.
+   */
+  const confirmDeletion = async (href: string): Promise<string | null> => {
+    const dialogSelector = '[role="dialog"],[aria-modal="true"],.ds-modal-content'
+    const titlePattern = /^(永久删除对话|删除该对话|Delete chat\??|Delete chat)$/i
+    const confirmPattern = /^(删除|Delete)$/i
+    const cancelPattern = /^(取消|Cancel)$/i
+    const deadline = Date.now() + 5000
+    let clicked = false
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+      if (!profile.isConnected || !profile.hasAttribute('data-dsh-chat-profile-confirmed')
+        || doc.defaultView?.location.origin !== 'https://chat.deepseek.com'
+        || doc.defaultView.location.pathname !== originalPath) return error
+      const present = [...sidebar.querySelectorAll<HTMLAnchorElement>('a[href]')].some(el => el.href === href)
+      if (!present) return null
+      if (clicked) continue
+      const dialogs = [...doc.querySelectorAll<HTMLElement>(dialogSelector)]
+        .filter(el => !el.querySelector(dialogSelector))
+        .filter(el => el.getBoundingClientRect().height > 0)
+        .filter(el => titlePattern.test((el.querySelector<HTMLElement>('.ds-modal-content__title')?.textContent ?? '').trim())
+          || /永久删除对话|Delete chat\?/i.test(el.textContent ?? ''))
+      if (dialogs.length !== 1) continue
+      const dialog = dialogs[0]!
+      const confirms = [...dialog.querySelectorAll<HTMLElement>('button,[role="button"],.ds-button')]
+        .filter(el => !el.matches(':disabled,[aria-disabled="true"]'))
+        .filter(el => confirmPattern.test(el.textContent?.trim() ?? '') && !cancelPattern.test(el.textContent?.trim() ?? ''))
+      const unique = [...new Set(confirms)].filter(el => !confirms.some(other => other !== el && el.contains(other)))
+      if (unique.length !== 1) return '官网删除确认框结构已变化，请在网页中手动删除。'
+      unique[0]!.click()
+      clicked = true
+    }
+    return clicked ? '官网未确认删除结果，请刷新列表后重试。' : '官网未弹出删除确认框，请刷新列表后重试。'
+  }
   if (doc.querySelector('[role="dialog"],.ds-modal-content')) return '请先关闭官网当前弹窗，再操作对话。'
   const links = [...sidebar.querySelectorAll<HTMLAnchorElement>('a[href]')].filter(el => el.href === command.href)
   if (links.length !== 1) return error
@@ -61,6 +103,11 @@ export async function performWebsiteConversationAction(doc: Document, command: E
       const unique = [...new Set(matches)].filter(el => !matches.some(other => other !== el && el.contains(other)))
       if (unique.length === 1) {
         unique[0]!.click()
+        // Deleting is two steps on this site: the menu item opens a confirmation
+        // dialog ("永久删除对话" / "Delete chat?") whose confirm button carries the
+        // same "删除"/"Delete" label. Returning here would report success while the
+        // conversation stayed in place.
+        if (command.action === 'delete') return await confirmDeletion(command.href)
         if(command.action!=='rename') return null
         const renameDeadline=Date.now()+3000
         let submitted=false
