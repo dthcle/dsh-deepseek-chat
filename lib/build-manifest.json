@@ -1,11 +1,11 @@
 {
   "format": 1,
   "name": "dsh-deepseek-chat",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "inputs": {
     "assets/icon.svg": "a86632dd67a310d9aadf92a0af0e84c4f9495441c9b46e483df2a398ecf37008",
     "cordis.patch.yml": "4c2a0b94349bb252771fafbf409db571b8375295310cc83466296d61b4c32408",
-    "package.json": "e69e1c85cb53d8670d71b53116832837a758f865e601ec11f17234a3b5c70ffb",
+    "package.json": "70503598c1c1603d3a8befeea607fb1ef9ead89231f507397597e89dfe19b10c",
     "pnpm-lock.yaml": "b8b6acac52504ef1d5dbb44f859b1e998a5fde91764d48479d34682cf7b1faa3",
     "scripts/build.mjs": "0675f38a2988be8abe844f150114150d5c64917eca10fde81eb27456d56fec94",
     "scripts/check-artifact.mjs": "d57ec2df93427a3361c741ae924d66a159823c8037537c070f5b1973d54e061d",
