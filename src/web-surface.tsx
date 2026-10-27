@@ -231,6 +231,22 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
       void executeScript(websitePromptScript(systemPrompt.current)).catch(() => {})
     }
     installPrompt.current = applyPrompt
+    /**
+     * Give a page that already wrote its restored session a short window to
+     * notice it on its own. Returns true when the site stops reporting the
+     * signed-out route, which makes the caller's reload unnecessary.
+     */
+    const waitForRestoredSession = async (): Promise<boolean> => {
+      const deadline = Date.now() + 1_500
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        if (events.signal.aborted) return false
+        let path = ''
+        try { path = new URL(current.getURL()).pathname } catch { return false }
+        if (!/^\/sign_in\/?$/.test(path)) return true
+      }
+      return false
+    }
     const prepareSession = async (): Promise<boolean> => {
       if(restorationAttempted) return true
       restorationAttempted=true
@@ -250,6 +266,12 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
         if(!sameRecovery()) return true
         if(result==='restored') {
           restoredFromVault=true;restoreDeadline=Date.now()+15_000
+          // The guest re-dispatched the storage events, so an already rendered page
+          // may adopt the restored identity without a reload. Give it a short
+          // window to prove that; reload only if it still reports signed-out. A
+          // reload here is what made the page visibly load twice on every start.
+          const settled = await waitForRestoredSession()
+          if (settled) { setPresentationReady(true); fastPollingUntil = Date.now() + 60_000; return true }
           setPresentationReady(false);report(true);current.reload();return false
         }
         if(result!=='present') bridge.reportWebsiteSessionError(generation,'当前官网未能恢复已保存的登录，请在网页中重新登录。')
@@ -300,12 +322,12 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
           if(result.status!=='loading') documentPresented=true
           // Publish account/login/navigation before vault I/O. Both login surfaces
           // observe the same website state without waiting for a save or Settings open.
-          // Reveal the site's own page as soon as its document is usable: the
-          // adapter's list/account recognition finishes after paint, exactly like
-          // the site itself. Holding the page hidden until 'ready' is what made a
-          // cold start feel slower than the browser.
-          // Never pre-reveal the sign-in route: it waits for the confirmed
-          // signed-out state so the site's login form cannot flash first.
+          // This call already applied the adapter's styling to the document, so
+          // revealing here shows the adapted page once instead of showing the raw
+          // site and then visibly re-styling it. The navigation list may still
+          // fill in afterwards, which does not re-layout the page itself.
+          // Never reveal the sign-in route: it waits for the confirmed signed-out
+          // state so the site's login form cannot flash first.
           bridge.reportWebsiteNavigation(generation,result)
           if (result.status !== 'sign-in') setPresentationReady(true)
           if (navigationRefresh && requestDocumentRevision>navigationRefresh.documentRevision) {
@@ -430,12 +452,20 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
       fastPollingUntil=Date.now()+8000;syncNavigation()
     }, { signal: events.signal })
     current.addEventListener('did-stop-loading', () => {
-      report(false); syncNavigation(); applyPrompt()
-      // The site has finished loading its own document: show it now and let the
-      // navigation list arrive from the identification that is already running.
-      // Never pre-reveal the sign-in route: it must wait for the confirmed
-      // signed-out state, otherwise the site's login form flashes first.
-      if (approvedOrigin() && !/^\/sign_in\/?$/.test(new URL(current.getURL()).pathname)) setPresentationReady(true)
+      report(false); applyPrompt()
+      // Apply the adapter's own styling to the freshly loaded document first, then
+      // reveal. Revealing before the first projection made the page visibly change
+      // once more when the styling landed; this way the user sees one rendered
+      // result instead of a render followed by a second, adapted render.
+      // Never pre-reveal the sign-in route: it waits for the confirmed signed-out
+      // state so the site's login form cannot flash first.
+      const revealable = () => approvedOrigin()
+        && !/^\/sign_in\/?$/.test(new URL(current.getURL()).pathname)
+        && !events.signal.aborted
+      queued = queued.then(() => adapt(snapshotCommand()))
+        .then(() => { if (revealable()) setPresentationReady(true) })
+        .catch(() => { if (revealable()) setPresentationReady(true) })
+        .then(() => { syncNavigation() })
     }, { signal: events.signal })
     current.addEventListener('did-fail-load', event => {
       const failure = event as Event & { readonly isMainFrame?: boolean; readonly errorCode?: number }

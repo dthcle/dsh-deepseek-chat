@@ -73,10 +73,21 @@ export function adaptWebsiteSession(doc: Document, command: WebsiteSessionComman
     const next = [JSON.stringify({ value: command.session.token, __version: '0' }),
       JSON.stringify({ value: { id: command.session.userId }, __version: '0' }), command.session.deviceId] as const
     try {
-      // Set identity first, token last. The caller reloads only after all writes succeed.
+      // Set identity first, token last.
       storage.setItem(keys[2], next[2])
       storage.setItem(keys[1], next[1])
       storage.setItem(keys[0], next[0])
+      // The site subscribes to storage events, which a same-document write does
+      // not emit. Re-dispatch the standard event so an already rendered page can
+      // adopt the restored identity in place instead of forcing a full reload.
+      try {
+        for (const key of keys) {
+          const event = new StorageEvent('storage', {
+            key, newValue: storage.getItem(key), oldValue: null, url: page.location.href, storageArea: storage,
+          })
+          page.dispatchEvent(event)
+        }
+      } catch { /* A reload remains available as the caller's fallback. */ }
       return 'restored'
     } catch {
       // Web Storage has no transaction API: roll back every fixed key as a best effort.
