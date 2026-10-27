@@ -155,7 +155,10 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
     let pendingSessionCapture: Promise<void> | null = null
     let navigationRefresh: { requestId:number; authenticationRevision:number; documentRevision:number } | null = null
     let navigationRefreshTimer: ReturnType<typeof setTimeout> | undefined
-    let fastPollingUntil = Date.now()+8000
+    // Every guest starts cold (the reservation is released when CHAT unmounts),
+    // so the first seconds after mount are always the ones that matter: identify
+    // on the fast cadence instead of waiting out a slow 1.2s tick.
+    let fastPollingUntil = Date.now()+60_000
     let lastPolled = 0
     let lastNavigationStatus: string | null = null
     /** Consecutive failed projections in this document; reset by any success. */
@@ -297,7 +300,14 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
           if(result.status!=='loading') documentPresented=true
           // Publish account/login/navigation before vault I/O. Both login surfaces
           // observe the same website state without waiting for a save or Settings open.
-          bridge.reportWebsiteNavigation(generation,result);if(result.status!=='loading' || !documentPresented) setPresentationReady(result.status!=='loading')
+          // Reveal the site's own page as soon as its document is usable: the
+          // adapter's list/account recognition finishes after paint, exactly like
+          // the site itself. Holding the page hidden until 'ready' is what made a
+          // cold start feel slower than the browser.
+          // Never pre-reveal the sign-in route: it waits for the confirmed
+          // signed-out state so the site's login form cannot flash first.
+          bridge.reportWebsiteNavigation(generation,result)
+          if (result.status !== 'sign-in') setPresentationReady(true)
           if (navigationRefresh && requestDocumentRevision>navigationRefresh.documentRevision) {
             if (result.status==='ready' && result.authenticated===true) finishNavigationRefresh(null)
             else if (result.status==='sign-in') finishNavigationRefresh('官网登录已失效，请重新登录后刷新列表。')
@@ -400,6 +410,9 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
       })
     }
     current.addEventListener('dom-ready', () => {
+      // A new document is the moment identification can first succeed; do not
+      // wait for the poller's next tick on top of the page load itself.
+      fastPollingUntil = Date.now() + 60_000
       if (!bootstrapped) { bootstrapped = true; navigate(WEBSITE_URL) }
       else { resetDocumentPresentation(); syncNavigation() }
       applyPrompt()
@@ -416,7 +429,14 @@ export function DshChatWebSurface({ bridge, nativeBrowser }: PropsRuntime<'shell
       if ((event as Event & { readonly isMainFrame?: boolean }).isMainFrame !== true) return
       fastPollingUntil=Date.now()+8000;syncNavigation()
     }, { signal: events.signal })
-    current.addEventListener('did-stop-loading', () => { report(false); syncNavigation(); applyPrompt() }, { signal: events.signal })
+    current.addEventListener('did-stop-loading', () => {
+      report(false); syncNavigation(); applyPrompt()
+      // The site has finished loading its own document: show it now and let the
+      // navigation list arrive from the identification that is already running.
+      // Never pre-reveal the sign-in route: it must wait for the confirmed
+      // signed-out state, otherwise the site's login form flashes first.
+      if (approvedOrigin() && !/^\/sign_in\/?$/.test(new URL(current.getURL()).pathname)) setPresentationReady(true)
+    }, { signal: events.signal })
     current.addEventListener('did-fail-load', event => {
       const failure = event as Event & { readonly isMainFrame?: boolean; readonly errorCode?: number }
       if (failure.isMainFrame === true && failure.errorCode !== -3) report(false, 'DeepSeek 网页加载失败。请检查网络后重试。')
